@@ -1,0 +1,39 @@
+export interface Env {
+  INVEST_DB: D1Database;
+  INVEST_R2: R2Bucket;
+
+  // vars
+  SITE_NAME: string;
+  MARKETS: string;
+  UNIVERSE_LIMIT: string;
+  NEWS_MODEL: string;
+  MEMBER_SIGNUP_ENABLED: string;
+  CF_ACCESS_TEAM_DOMAIN: string;
+  CF_ACCESS_AUD: string;
+  JQUANTS_BASE_URL: string;
+  JQUANTS_FIELD_ALIASES: string;
+
+  // secrets
+  JQUANTS_API_KEY?: string;
+  ANTHROPIC_API_KEY?: string;
+}
+
+/** ランキング 1 行。API と画面が同じ形を見る。 */
+export interface RankingRow {
+  readonly symbolId: string;
+  readonly code: string;
+  readonly name: string;
+  readonly sector33: string | null;
+  readonly date: string;
+  readonly total: number | null;
+  readonly verdict: string;
+  readonly rsi14: number | null;
+  readonly macdHist: number | null;
+  readonly volRatio: number | null;
+  readonly close: number | null;
+  readonly entryPx: number | null;
+  readonly stopPx: number | null;
+  readonly targetPx: number | null;
+  readonly rr: number | null;
+  readonly goldenCrossStrength: number | null;
+}

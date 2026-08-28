@@ -1,0 +1,67 @@
+name = "w11-invest-library"
+main = "src/index.ts"
+compatibility_date = "2026-08-25"
+compatibility_flags = ["nodejs_compat"]
+
+# ドメインが確定するまでは workers.dev で動かす。
+# 確定したら workers_dev = false にして、下の [[routes]] を有効化する。
+# **差し替えるのはこのファイルのここだけ**で済むようにしてある。
+workers_dev = true
+
+# [[routes]]
+# pattern = "example.com/"
+# zone_name = "example.com"
+# [[routes]]
+# pattern = "example.com/*"
+# zone_name = "example.com"
+
+[[d1_databases]]
+binding = "INVEST_DB"
+database_name = "invest-db"
+# `wrangler d1 create invest-db` の出力を貼る
+database_id = "REPLACE_WITH_D1_DATABASE_ID"
+
+[[r2_buckets]]
+binding = "INVEST_R2"
+bucket_name = "invest-snapshots"
+
+[triggers]
+# 19:30 JST（10:30 UTC）に本走。J-Quants の当日データが出揃ったあとを狙う。
+# 07:00 JST（22:00 UTC 前日）に取りこぼしの回収。
+# **Cron は 1 本にまとめてある。** ステップごとの再実行は job_runs で制御する。
+crons = ["30 10 * * 1-5", "0 22 * * 0-4"]
+
+[observability]
+enabled = true
+
+[vars]
+SITE_NAME = "Invest Library"
+# Phase 1 の対象市場。Phase 3 以降はここに 'US' などを足す。
+MARKETS = "JP"
+# 対象銘柄数の上限。Phase 1 は 500。Phase 2 で外す。
+UNIVERSE_LIMIT = "500"
+# ニュース分析に使うモデル（Phase 1b）。
+NEWS_MODEL = "claude-opus-5"
+
+# --- 会員機能 ---
+# **"true" にする前に docs/DATA-SOURCES.md の「再配信の可否」を埋めること。**
+# 市場データを登録ユーザーへ提供することが契約上の第三者提供に当たるかを
+# 確認するまで、ここは "false" のままにする。
+MEMBER_SIGNUP_ENABLED = "false"
+
+# --- Cloudflare Access ---
+# 両方を設定すると、リクエストごとに Access の JWT を検証する。
+# 空なら検証しない（ローカル開発用）。本番では必ず設定すること。
+CF_ACCESS_TEAM_DOMAIN = ""
+CF_ACCESS_AUD = ""
+
+# --- J-Quants ---
+JQUANTS_BASE_URL = "https://api.jquants.com/v2"
+# API の項目名が変わったときの逃げ道。コードを直さずここで別名を足せる。
+# 例: {"close":["C","Close","ClosePrice"]}
+# `npm run check:datasource` が実際に返ってきた項目名を表示する。
+JQUANTS_FIELD_ALIASES = "{}"
+
+# --- Secrets（wrangler secret put で登録。このファイルには書かないこと）---
+# JQUANTS_API_KEY   : J-Quants の API キー
+# ANTHROPIC_API_KEY : ニュース分析用（Phase 1b）

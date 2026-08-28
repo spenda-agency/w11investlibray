@@ -1,0 +1,256 @@
+import type { CalendarRow, MarketDataSource, PriceRow, SymbolRow } from '@invest/core';
+import { toSymbolId } from '@invest/core';
+import type { Env } from '../types.js';
+
+/**
+ * J-Quants API V2 のクライアント。
+ *
+ * V1 は 2026-06-01 に提供終了済み。V2 は `x-api-key` ヘッダで認証する。
+ *
+ * **項目名のゆらぎをここで吸収する。** V2 で項目名が短縮された（`Close` → `C` など）が、
+ * 短縮名は変わりうるし、プランによって返る項目も違う。モデル側のコードが
+ * 名前の揺れに影響されないよう、正準名へ寄せる層をここに 1 枚挟む。
+ * 当たらない名前が出たら `npm run check:datasource` が実際に返ってきた
+ * 項目名を出すので、`JQUANTS_FIELD_ALIASES` に足せばコードを直さず復旧できる。
+ */
+
+export const JQUANTS_DEFAULT_BASE_URL = 'https://api.jquants.com/v2';
+
+/**
+ * 正準名 → API 側の候補名。**先に書いたものから順に探す。**
+ * V2 の短縮名を確定できていない項目があるため、長短どちらも並べてある。
+ */
+export const FIELD_ALIASES: Readonly<Record<string, readonly string[]>> = {
+  date: ['Date', 'date', 'Dt'],
+  code: ['Code', 'code', 'Cd'],
+  open: ['Open', 'O', 'AdjustmentOpen'],
+  high: ['High', 'H', 'AdjustmentHigh'],
+  low: ['Low', 'L', 'AdjustmentLow'],
+  close: ['Close', 'C', 'AdjustmentClose'],
+  volume: ['Volume', 'V', 'Vo', 'AdjustmentVolume'],
+  turnover: ['TurnoverValue', 'TuVa', 'Turnover'],
+  adjustmentFactor: ['AdjustmentFactor', 'AdjFa', 'AdjF'],
+  companyName: ['CompanyName', 'Name', 'CoNm'],
+  companyNameEnglish: ['CompanyNameEnglish', 'NameEnglish'],
+  sector33: ['Sector33CodeName', 'Sector33Code', 'Sc33Nm'],
+  sector17: ['Sector17CodeName', 'Sector17Code', 'Sc17Nm'],
+  marketCode: ['MarketCodeName', 'MarketCode', 'MktCdNm'],
+  holidayDivision: ['HolidayDivision', 'HolidayDiv', 'HdDiv'],
+};
+
+export type JquantsRow = Record<string, unknown>;
+
+export interface JquantsClientOptions {
+  readonly baseUrl?: string;
+  /** `JQUANTS_FIELD_ALIASES` の中身。正準名 → 追加の候補名。 */
+  readonly extraAliases?: Record<string, readonly string[]>;
+  readonly fetchImpl?: typeof fetch;
+}
+
+export class JquantsError extends Error {
+  constructor(
+    message: string,
+    readonly status?: number,
+  ) {
+    super(message);
+    this.name = 'JquantsError';
+  }
+}
+
+export class JquantsClient {
+  private readonly baseUrl: string;
+  private readonly aliases: Record<string, readonly string[]>;
+  private readonly doFetch: typeof fetch;
+
+  constructor(
+    private readonly apiKey: string,
+    options: JquantsClientOptions = {},
+  ) {
+    if (!apiKey) throw new JquantsError('JQUANTS_API_KEY が未設定');
+    this.baseUrl = (options.baseUrl ?? JQUANTS_DEFAULT_BASE_URL).replace(/\/+$/, '');
+    this.aliases = mergeAliases(FIELD_ALIASES, options.extraAliases ?? {});
+    this.doFetch = options.fetchImpl ?? fetch;
+  }
+
+  /**
+   * ページングを畳んで全件を返す。
+   * J-Quants は `pagination_key` を返してくるので、無くなるまで辿る。
+   */
+  async getAll(path: string, params: Record<string, string>, key: string): Promise<JquantsRow[]> {
+    const rows: JquantsRow[] = [];
+    let paginationKey: string | undefined;
+    // 無限ループの保険。1 日ぶんが 100 ページを超えることは無い。
+    for (let page = 0; page < 100; page += 1) {
+      const url = new URL(`${this.baseUrl}${path}`);
+      for (const [k, v] of Object.entries(params)) url.searchParams.set(k, v);
+      if (paginationKey !== undefined) url.searchParams.set('pagination_key', paginationKey);
+
+      const res = await this.doFetch(url.toString(), {
+        headers: { 'x-api-key': this.apiKey, accept: 'application/json' },
+      });
+      if (!res.ok) {
+        const body = await res.text().catch(() => '');
+        throw new JquantsError(
+          `J-Quants ${path} が ${res.status} を返した: ${body.slice(0, 200)}`,
+          res.status,
+        );
+      }
+      const json = (await res.json()) as Record<string, unknown>;
+      const chunk = json[key];
+      if (Array.isArray(chunk)) rows.push(...(chunk as JquantsRow[]));
+
+      const next = json['pagination_key'];
+      if (typeof next !== 'string' || next === '') break;
+      paginationKey = next;
+    }
+    return rows;
+  }
+
+  /** 正準名で値を取り出す。見つからなければ `undefined`。 */
+  field(row: JquantsRow, canonical: string): unknown {
+    const candidates = this.aliases[canonical];
+    if (candidates === undefined) return undefined;
+    for (const name of candidates) {
+      const v = row[name];
+      if (v !== undefined && v !== null && v !== '') return v;
+    }
+    return undefined;
+  }
+
+  requireNumber(row: JquantsRow, canonical: string, context: string): number {
+    const v = this.field(row, canonical);
+    const n = typeof v === 'number' ? v : typeof v === 'string' ? Number(v) : NaN;
+    if (!Number.isFinite(n)) {
+      throw new JquantsError(
+        `項目 "${canonical}" が見つからない（${context}）。` +
+          `候補: ${(this.aliases[canonical] ?? []).join(', ')} / 実際のキー: ${Object.keys(row).join(', ')}。` +
+          'JQUANTS_FIELD_ALIASES に別名を足すこと。',
+      );
+    }
+    return n;
+  }
+
+  optionalNumber(row: JquantsRow, canonical: string): number | null {
+    const v = this.field(row, canonical);
+    const n = typeof v === 'number' ? v : typeof v === 'string' ? Number(v) : NaN;
+    return Number.isFinite(n) ? n : null;
+  }
+
+  requireString(row: JquantsRow, canonical: string, context: string): string {
+    const v = this.field(row, canonical);
+    if (typeof v === 'string' && v !== '') return v;
+    if (typeof v === 'number') return String(v);
+    throw new JquantsError(
+      `項目 "${canonical}" が見つからない（${context}）。` +
+        `実際のキー: ${Object.keys(row).join(', ')}。JQUANTS_FIELD_ALIASES に別名を足すこと。`,
+    );
+  }
+
+  optionalString(row: JquantsRow, canonical: string): string | null {
+    const v = this.field(row, canonical);
+    if (typeof v === 'string' && v !== '') return v;
+    if (typeof v === 'number') return String(v);
+    return null;
+  }
+}
+
+/** 日本株のデータ取得口。`MarketDataSource` を実装している。 */
+export class JquantsJpSource implements MarketDataSource {
+  readonly market = 'JP' as const;
+
+  constructor(private readonly client: JquantsClient) {}
+
+  async listSymbols(asOf: string): Promise<SymbolRow[]> {
+    // date を指定すると「その日時点の」一覧が返る。廃止銘柄の把握に必須。
+    const rows = await this.client.getAll('/listed/info', { date: asOf }, 'info');
+    return rows.map((row) => {
+      const code = this.client.requireString(row, 'code', '/listed/info');
+      return {
+        symbolId: toSymbolId('JP', code),
+        market: 'JP' as const,
+        code,
+        name: this.client.optionalString(row, 'companyName') ?? code,
+        sector33: this.client.optionalString(row, 'sector33'),
+        sector17: this.client.optionalString(row, 'sector17'),
+        currency: 'JPY',
+        listed: true,
+      };
+    });
+  }
+
+  async fetchDailyBars(date: string): Promise<PriceRow[]> {
+    // date 指定なら 1 リクエストで全銘柄が返る。
+    // 500 銘柄でも 4,000 銘柄でも取得コストが変わらないのはこのため。
+    const rows = await this.client.getAll('/prices/daily_quotes', { date }, 'daily_quotes');
+    const out: PriceRow[] = [];
+    for (const row of rows) {
+      const code = this.client.requireString(row, 'code', '/prices/daily_quotes');
+      const close = this.client.optionalNumber(row, 'close');
+      // 売買が成立しなかった日は価格が null で返る。その日は行を作らない。
+      if (close === null) continue;
+      out.push({
+        symbolId: toSymbolId('JP', code),
+        date: this.client.optionalString(row, 'date') ?? date,
+        open: this.client.optionalNumber(row, 'open') ?? close,
+        high: this.client.optionalNumber(row, 'high') ?? close,
+        low: this.client.optionalNumber(row, 'low') ?? close,
+        close,
+        volume: this.client.optionalNumber(row, 'volume') ?? 0,
+        adjustmentFactor: this.client.optionalNumber(row, 'adjustmentFactor') ?? 1,
+      });
+    }
+    return out;
+  }
+
+  async tradingCalendar(from: string, to: string): Promise<CalendarRow[]> {
+    const rows = await this.client.getAll(
+      '/markets/trading_calendar',
+      { from, to },
+      'trading_calendar',
+    );
+    return rows.map((row) => {
+      const division = this.client.optionalString(row, 'holidayDivision');
+      return {
+        market: 'JP' as const,
+        date: this.client.requireString(row, 'date', '/markets/trading_calendar'),
+        // 0 = 非営業日。1 = 営業日、2 = 東証半日立会（営業日として扱う）。
+        isOpen: division !== '0',
+      };
+    });
+  }
+}
+
+export function createJquantsSource(env: Env): JquantsJpSource {
+  const client = new JquantsClient(env.JQUANTS_API_KEY ?? '', {
+    baseUrl: env.JQUANTS_BASE_URL || JQUANTS_DEFAULT_BASE_URL,
+    extraAliases: parseAliases(env.JQUANTS_FIELD_ALIASES),
+  });
+  return new JquantsJpSource(client);
+}
+
+export function parseAliases(raw: string | undefined): Record<string, readonly string[]> {
+  if (!raw || raw.trim() === '') return {};
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    if (typeof parsed !== 'object' || parsed === null) return {};
+    const out: Record<string, readonly string[]> = {};
+    for (const [k, v] of Object.entries(parsed as Record<string, unknown>)) {
+      if (Array.isArray(v)) out[k] = v.filter((x): x is string => typeof x === 'string');
+    }
+    return out;
+  } catch {
+    // 設定ミスでパイプライン全体を止めない。既定の別名表で動かす。
+    return {};
+  }
+}
+
+function mergeAliases(
+  base: Readonly<Record<string, readonly string[]>>,
+  extra: Record<string, readonly string[]>,
+): Record<string, readonly string[]> {
+  const out: Record<string, readonly string[]> = {};
+  for (const [k, v] of Object.entries(base)) out[k] = [...v];
+  // 追加ぶんを先頭に置く。運用中に見つけた名前を優先させたいため。
+  for (const [k, v] of Object.entries(extra)) out[k] = [...v, ...(out[k] ?? [])];
+  return out;
+}

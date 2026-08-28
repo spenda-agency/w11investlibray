@@ -1,0 +1,30 @@
+{
+  "name": "w11investlibray",
+  "version": "0.1.0",
+  "private": true,
+  "description": "AI投資リサーチ基盤 — 日次スクリーニングと判断支援 (Cloudflare Workers + D1)",
+  "type": "module",
+  "workspaces": [
+    "packages/core",
+    "packages/worker",
+    "packages/batch"
+  ],
+  "scripts": {
+    "typecheck": "npm run typecheck --workspaces --if-present",
+    "test": "npm run test --workspaces --if-present",
+    "dev": "npm run dev -w @invest/worker",
+    "deploy": "npm run deploy -w @invest/worker",
+    "check:datasource": "npm run check:datasource -w @invest/batch",
+    "backfill": "npm run backfill -w @invest/batch"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^5.20260825.1",
+    "@types/node": "^22.20.1",
+    "esbuild": "^0.24.0",
+    "typescript": "^5.7.2",
+    "wrangler": "^4.125.0"
+  },
+  "engines": {
+    "node": ">=22"
+  }
+}

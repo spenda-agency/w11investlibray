@@ -1,0 +1,20 @@
+{
+  "name": "@invest/batch",
+  "version": "0.1.0",
+  "private": true,
+  "description": "重い処理（バックフィル・バックテスト・疎通確認）。GitHub Actions から回す",
+  "type": "module",
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "build": "esbuild src/cli.ts --bundle --format=esm --platform=node --packages=external --outfile=.build/cli.mjs",
+    "build:test": "npm run build",
+    "test": "npm run build && node --test test/*.test.mjs",
+    "cli": "npm run build --silent && node .build/cli.mjs",
+    "check:datasource": "npm run cli --silent -- check",
+    "backfill": "npm run cli --silent -- backfill",
+    "backtest": "npm run cli --silent -- backtest"
+  },
+  "dependencies": {
+    "@invest/core": "*"
+  }
+}

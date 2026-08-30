@@ -1,4 +1,5 @@
 import { escapeHtml } from './format.js';
+import { FONT_STACK, TOKENS } from './tokens.js';
 
 export interface LayoutOptions {
   readonly title: string;
@@ -18,7 +19,7 @@ export function layout(o: LayoutOptions): string {
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="robots" content="noindex, nofollow">
 <title>${escapeHtml(o.title)} — ${escapeHtml(o.siteName)}</title>
-<style>${STYLES}</style>
+<style>${TOKENS}${STYLES}</style>
 </head>
 <body>
 <header class="site">
@@ -56,24 +57,11 @@ const WARN_SAMPLE = `<div class="banner banner-warn">
   <strong>サンプルデータです。</strong>本物の市場データではありません。
 </div>`;
 
+/** ダッシュボード側の見た目。パレットは tokens.ts が持つ。 */
 const STYLES = `
-:root {
-  --bg: #fbfaf9; --panel: #ffffff; --ink: #1a1a19; --muted: #6b6a67;
-  --line: #e5e3df; --accent: #2f6f4f; --danger: #a4402f; --warn: #8a6d1f;
-  --up: #2f6f4f; --down: #a4402f;
-  --radius: 10px;
-}
-@media (prefers-color-scheme: dark) {
-  :root {
-    --bg: #16161a; --panel: #1e1e23; --ink: #eceae6; --muted: #9b9a96;
-    --line: #32323a; --accent: #6dbd92; --danger: #e08272; --warn: #d9b45c;
-    --up: #6dbd92; --down: #e08272;
-  }
-}
-* { box-sizing: border-box; }
 body {
   margin: 0; background: var(--bg); color: var(--ink);
-  font-family: system-ui, -apple-system, "Hiragino Kaku Gothic ProN", "Noto Sans JP", sans-serif;
+  font-family: ${FONT_STACK};
   font-size: 15px; line-height: 1.6;
 }
 a { color: inherit; }

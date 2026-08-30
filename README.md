@@ -104,6 +104,7 @@ npm run dev                  # http://localhost:8787/
 Phase ごとの範囲とブランチは [`docs/ROADMAP.md`](docs/ROADMAP.md)。
 別のセッションや人に引き継ぐときは [`docs/HANDOVER.md`](docs/HANDOVER.md)
 （リポジトリで渡るもの / 渡らないもの）。
+LP をデザインするときは [`docs/LP-BRIEF.md`](docs/LP-BRIEF.md)。
 
 ### 公開範囲について
 

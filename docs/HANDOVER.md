@@ -16,6 +16,7 @@
 | データソースの利用条件・未解決の論点 | [`DATA-SOURCES.md`](./DATA-SOURCES.md) |
 | Phase とブランチの対応、継ぎ目 | [`ROADMAP.md`](./ROADMAP.md) |
 | デプロイ手順とつまずいたときの切り分け | [`DEPLOY.md`](./DEPLOY.md) |
+| LP をデザインするときの仕様 | [`LP-BRIEF.md`](./LP-BRIEF.md) |
 | 作業するときの規約 | [`../CLAUDE.md`](../CLAUDE.md) |
 
 コードの側でも、判断の理由はコメントとして残してある。
@@ -74,7 +75,7 @@ npm run dev                                 # http://localhost:8787/
 |---|---|
 | 今ある画面と URL | `packages/worker/src/routes/ui.ts`、`README.md` |
 | 画面に出す項目の実体 | `packages/worker/src/types.ts` の `RankingRow` |
-| 現在の配色・タイポグラフィ | `packages/worker/src/ui/layout.ts` の `STYLES`（CSS 変数で light / dark 両対応） |
+| 現在の配色・タイポグラフィ | `packages/worker/src/ui/tokens.ts`（**パレットの唯一の定義**。light / dark 両対応） |
 | 画面文言の考え方 | `SCORING.md`（「推奨」ではなく「条件合致」など） |
 | 実際の見た目 | `npm run dev` で起動して確認できる |
 
@@ -96,10 +97,18 @@ npm run dev                                 # http://localhost:8787/
 ### 公開ページ（LP）について
 
 `packages/worker/src/ui/lp.ts` が LP、`src/routes/lp.ts` がその配線。
-**本文（コピー）はテンプレートが変わっても使い回せる**ように、
-見た目（`STYLES`）と本文を同じファイル内で分けて置いてある。
-Claude Design のテンプレートを当てるときは `STYLES` と各節のマークアップを
-差し替え、本文はそのまま持っていけばよい。
+**デザインの仕様は [`LP-BRIEF.md`](./LP-BRIEF.md) にまとめてある**
+（節の役割、書いてはいけない表現、フォームの仕様、差し替えるファイル）。
+
+テンプレートを当てるときに触るのは 2 箇所だけ。
+
+| ファイル | |
+|---|---|
+| `src/ui/tokens.ts` | 配色。**ここ 1 つで LP とダッシュボードの両方に反映される** |
+| `src/ui/lp.ts` の `STYLES` と各節 | LP のレイアウトとマークアップ。**本文はそのまま流用できる** |
+
+`tokens.ts` 以外でパレットを再定義すると `npm test` が落ちる。
+LP とダッシュボードで色がずれるのを防ぐため。
 
 ### 引き継ぎ先に渡すとよいもの
 

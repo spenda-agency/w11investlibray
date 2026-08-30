@@ -1,4 +1,5 @@
 import { escapeHtml } from './format.js';
+import { FONT_STACK, TOKENS } from './tokens.js';
 
 /**
  * 先行登録の LP。**市場データを一切出さない公開ページ。**
@@ -34,7 +35,7 @@ export function lpPage(o: LpOptions): string {
 <meta property="og:title" content="${escapeHtml(o.siteName)}">
 <meta property="og:description" content="毎日、全銘柄を同じ物差しで測る。条件に合致した候補と、その根拠まで。">
 <meta property="og:type" content="website">
-<style>${STYLES}</style>
+<style>${TOKENS}${STYLES}</style>
 </head>
 <body>
 
@@ -173,22 +174,21 @@ function formBlock(action: string, o: LpOptions, suffix: string): string {
 </form>`;
 }
 
+/**
+ * LP 側の見た目。パレットは tokens.ts が持つ。
+ * ここに残すのは LP 固有の値だけ。
+ *
+ * **デザインテンプレートを当てるときに差し替えるのはこの STYLES と
+ * 各節のマークアップ。** 本文（コピー）はそのまま持っていける。
+ */
 const STYLES = `
 :root {
-  --bg: #fbfaf9; --panel: #ffffff; --ink: #1a1a19; --muted: #6b6a67;
-  --line: #e5e3df; --accent: #2f6f4f; --danger: #a4402f;
+  /* 本文の 1 カラム幅。LP だけが使う */
   --maxw: 720px;
 }
-@media (prefers-color-scheme: dark) {
-  :root {
-    --bg: #16161a; --panel: #1e1e23; --ink: #eceae6; --muted: #9b9a96;
-    --line: #32323a; --accent: #6dbd92; --danger: #e08272;
-  }
-}
-* { box-sizing: border-box; }
 body {
   margin: 0; background: var(--bg); color: var(--ink);
-  font-family: system-ui, -apple-system, "Hiragino Kaku Gothic ProN", "Noto Sans JP", sans-serif;
+  font-family: ${FONT_STACK};
   font-size: 16px; line-height: 1.75; text-wrap: pretty;
 }
 a { color: var(--accent); }

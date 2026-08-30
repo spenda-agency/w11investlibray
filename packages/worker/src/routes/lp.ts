@@ -1,6 +1,6 @@
 import type { Env } from '../types.js';
 import { lpPage } from '../ui/lp.js';
-import { appUrl, lpBasePath } from '../site.js';
+import { appUrl, lpBasePath, lpUrl } from '../site.js';
 import { handleWaitlist } from './waitlist.js';
 import { escapeHtml } from '../ui/format.js';
 
@@ -16,9 +16,38 @@ export async function handleLpRequest(
 ): Promise<Response> {
   const base = lpBasePath(env);
   const target = appUrl(env, '/');
+  const canonical = lpUrl(env, '/');
 
   if (path === '/' || path === '') {
-    return html(lpPage({ siteName: env.SITE_NAME, basePath: base, appUrl: target }));
+    return html(
+      lpPage({
+        siteName: env.SITE_NAME,
+        basePath: base,
+        appUrl: target,
+        ...(canonical.startsWith('https://') ? { canonicalUrl: canonical } : {}),
+      }),
+    );
+  }
+
+  // 検索エンジン向け。**LP だけを拾わせる。**
+  // ダッシュボード側は別ホストで、そちらの robots.txt は全面拒否にしてある。
+  if (path === '/robots.txt') {
+    const sitemap = lpUrl(env, '/sitemap.xml');
+    return text(
+      `User-agent: *\nAllow: /\n${sitemap.startsWith('https://') ? `Sitemap: ${sitemap}\n` : ''}`,
+    );
+  }
+
+  if (path === '/sitemap.xml') {
+    const root = lpUrl(env, '/');
+    if (!root.startsWith('https://')) return text('', 404);
+    const urls = ['/', '/privacy'].map(
+      (p) => `  <url><loc>${lpUrl(env, p)}</loc></url>`,
+    );
+    return new Response(
+      `<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n${urls.join('\n')}\n</urlset>\n`,
+      { headers: { 'content-type': 'application/xml; charset=utf-8' } },
+    );
   }
 
   if (path === '/api/waitlist') {
@@ -63,6 +92,16 @@ async function errorMessage(res: Response): Promise<string> {
   } catch {
     return '送信に失敗した';
   }
+}
+
+function text(body: string, status = 200): Response {
+  return new Response(body, {
+    status,
+    headers: {
+      'content-type': 'text/plain; charset=utf-8',
+      'cache-control': 'public, max-age=3600',
+    },
+  });
 }
 
 function html(body: string, status = 200): Response {

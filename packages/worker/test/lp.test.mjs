@@ -51,10 +51,12 @@ test('ホスト未設定なら /lp 配下だけが LP（ローカル開発）', 
   assert.equal(resolveSite(new URL('http://localhost:8787/screener'), env).site, 'app');
 });
 
-test('未知のホストはアプリ側に落とす（LP を勝手に生やさない）', () => {
-  // 公開側を広げる方向に倒すと、市場データが漏れる経路になりうる。
+test('未知のホストには何も返さない', () => {
+  // 当初は「未知のホストはアプリ側に落とす」ことにしていたが、これは誤り。
+  // Cloudflare Access はゾーンのホスト名に紐づくため、別ホストから来た
+  // リクエストには適用されない。アプリを返すと認証を通らずに開いてしまう。
   const env = makeEnv(HOSTS);
-  assert.equal(resolveSite(new URL('https://someone-else.example/'), env).site, 'app');
+  assert.equal(resolveSite(new URL('https://someone-else.example/'), env).site, 'unknown');
 });
 
 test('末尾スラッシュを正規化する', () => {
@@ -268,4 +270,108 @@ test('壊れた JSON でも 500 にしない', async () => {
     ctx,
   );
   assert.equal(res.status, 400);
+});
+
+// ---- 想定外のホストとリダイレクト ---------------------------------------
+
+test('ホスト設定済みなら、一致しないホストにはアプリを返さない', async () => {
+  // Cloudflare Access はゾーンのホスト名に紐づく。*.workers.dev のような
+  // 別ホストから来たリクエストには適用されないので、ここでアプリを返すと
+  // 認証を通らずにダッシュボードが開く。
+  const env = makeEnv(HOSTS);
+  for (const host of [
+    'https://w11-invest-library.someone.workers.dev/',
+    'https://random.example/',
+    'https://goldencross-incomegains.com.evil.example/',
+  ]) {
+    const res = await handler.fetch(req(host), env, ctx);
+    assert.equal(res.status, 404, `${host} が応答している`);
+  }
+});
+
+test('resolveSite — 設定済みで一致しなければ unknown', () => {
+  const env = makeEnv(HOSTS);
+  assert.equal(resolveSite(new URL('https://nope.example/'), env).site, 'unknown');
+  // 片方だけ設定されていても本番扱いにする
+  const half = makeEnv({ LP_HOSTNAME: 'invest.example', APP_HOSTNAME: '' });
+  assert.equal(resolveSite(new URL('https://nope.example/'), half).site, 'unknown');
+});
+
+test('ホスト未設定のローカルでは、これまで通りパスで振り分ける', () => {
+  const env = makeEnv();
+  assert.equal(resolveSite(new URL('http://localhost:8787/'), env).site, 'app');
+  assert.equal(resolveSite(new URL('http://localhost:8787/lp'), env).site, 'lp');
+});
+
+test('www は apex へ 301 で寄せる', async () => {
+  const env = makeEnv(HOSTS);
+  const res = await handler.fetch(req('https://www.invest.example/privacy?a=1'), env, ctx);
+  assert.equal(res.status, 301);
+  assert.equal(res.headers.get('location'), 'https://invest.example/privacy?a=1');
+
+  const app = await handler.fetch(req('https://www.app.invest.example/screener'), env, ctx);
+  assert.equal(app.status, 301);
+  assert.equal(app.headers.get('location'), 'https://app.invest.example/screener');
+});
+
+// ---- 検索エンジン向け -------------------------------------------------------
+
+test('LP の robots.txt は索引を許し、sitemap を指す', async () => {
+  const env = makeEnv(HOSTS);
+  const res = await handler.fetch(req('https://invest.example/robots.txt'), env, ctx);
+  assert.equal(res.status, 200);
+  const body = await res.text();
+  assert.match(body, /Allow: \//);
+  assert.match(body, /Sitemap: https:\/\/invest\.example\/sitemap\.xml/);
+});
+
+test('アプリ側の robots.txt は全面拒否', async () => {
+  const env = makeEnv(HOSTS);
+  const res = await handler.fetch(req('https://app.invest.example/robots.txt'), env, ctx);
+  assert.equal(res.status, 200, '認証より手前で返す');
+  assert.match(await res.text(), /Disallow: \//);
+});
+
+test('sitemap.xml が LP のページを列挙する', async () => {
+  const env = makeEnv(HOSTS);
+  const res = await handler.fetch(req('https://invest.example/sitemap.xml'), env, ctx);
+  assert.equal(res.status, 200);
+  assert.match(res.headers.get('content-type'), /application\/xml/);
+  const body = await res.text();
+  assert.match(body, /<loc>https:\/\/invest\.example\/<\/loc>/);
+  assert.match(body, /<loc>https:\/\/invest\.example\/privacy<\/loc>/);
+  // ダッシュボードの URL を混ぜない
+  assert.ok(!body.includes('app.invest.example'));
+});
+
+test('LP に canonical と og:url が入る', async () => {
+  const env = makeEnv(HOSTS);
+  const html = await (await handler.fetch(req('https://invest.example/'), env, ctx)).text();
+  assert.match(html, /<link rel="canonical" href="https:\/\/invest\.example\/">/);
+  assert.match(html, /<meta property="og:url" content="https:\/\/invest\.example\/">/);
+});
+
+test('ローカルでは canonical を出さない（localhost を指してしまうため）', async () => {
+  const env = makeEnv();
+  const html = await (await handler.fetch(req('http://localhost:8787/lp'), env, ctx)).text();
+  assert.ok(!html.includes('rel="canonical"'));
+});
+
+test('LP は noindex にしない（ダッシュボードは noindex のまま）', async () => {
+  const env = makeEnv(HOSTS);
+  const lp = await (await handler.fetch(req('https://invest.example/'), env, ctx)).text();
+  assert.ok(!lp.includes('noindex'), 'LP は索引させる');
+});
+
+test('本番のホスト名を設定していても localhost では開発用に振り分ける', () => {
+  // wrangler.toml に本番のホスト名が入った状態で `wrangler dev` が
+  // 全部 404 になった（実際にやらかした）。ループバックは常に開発扱いにする。
+  const env = makeEnv({
+    LP_HOSTNAME: 'goldencross-incomegains.com',
+    APP_HOSTNAME: 'app.goldencross-incomegains.com',
+  });
+  assert.equal(resolveSite(new URL('http://localhost:8787/'), env).site, 'app');
+  assert.equal(resolveSite(new URL('http://localhost:8787/lp'), env).site, 'lp');
+  assert.equal(resolveSite(new URL('http://127.0.0.1:8787/screener'), env).site, 'app');
+  assert.equal(resolveSite(new URL('http://app.localhost:8787/'), env).site, 'app');
 });

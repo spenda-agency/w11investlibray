@@ -19,7 +19,17 @@ import { runDailyPipeline } from './jobs/dailyPipeline.js';
 export default {
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
     const url = new URL(request.url);
-    const { site, path } = resolveSite(url, env);
+    const { site, path, redirectTo } = resolveSite(url, env);
+
+    // www → apex。恒久的な移動として 301 で返す。
+    if (redirectTo !== undefined) {
+      return Response.redirect(redirectTo, 301);
+    }
+
+    // 想定外のホスト。**アプリを返さない**（Access を通らずに開かれるため）。
+    if (site === 'unknown') {
+      return json({ error: '見つからない' }, 404);
+    }
 
     // LP 側。認証は通さず、市場データにも触れない。
     if (site === 'lp') {
@@ -33,6 +43,14 @@ export default {
 
     // 監視用。ここだけ認証不要。内部の数字は返さない。
     if (path === '/api/health') return handleHealth(env);
+
+    // アプリ側は Access の後ろなのでクローラーは到達しないが、
+    // 設定が外れたときに索引されないよう全面拒否を返しておく。
+    if (path === '/robots.txt') {
+      return new Response('User-agent: *\nDisallow: /\n', {
+        headers: { 'content-type': 'text/plain; charset=utf-8' },
+      });
+    }
 
     const auth = await authenticate(request, env);
     if (!auth.ok) {

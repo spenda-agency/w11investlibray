@@ -18,6 +18,8 @@ export interface LpOptions {
   readonly siteName: string;
   readonly basePath: string;
   readonly appUrl: string;
+  /** LP の絶対 URL。canonical と OGP に使う。ローカルでは空。 */
+  readonly canonicalUrl?: string;
   /** 送信後の再表示。`ok` なら完了メッセージ、`error` なら理由を出す。 */
   readonly submitted?: 'ok' | null;
   readonly errorMessage?: string | null;
@@ -35,6 +37,13 @@ export function lpPage(o: LpOptions): string {
 <meta property="og:title" content="${escapeHtml(o.siteName)}">
 <meta property="og:description" content="毎日、全銘柄を同じ物差しで測る。条件に合致した候補と、その根拠まで。">
 <meta property="og:type" content="website">
+<meta property="og:locale" content="ja_JP">${
+  o.canonicalUrl
+    ? `
+<link rel="canonical" href="${escapeHtml(o.canonicalUrl)}">
+<meta property="og:url" content="${escapeHtml(o.canonicalUrl)}">`
+    : ''
+}
 <style>${TOKENS}${STYLES}</style>
 </head>
 <body>

@@ -45,7 +45,7 @@ npm run dev                                 # http://localhost:8787/
 | Secret | `ANTHROPIC_API_KEY` | Phase 1b で使う |
 | ID | D1 の `database_id` | `wrangler d1 create` の出力。`wrangler.toml` に貼る（現在は `REPLACE_WITH_D1_DATABASE_ID`） |
 | アカウント | Cloudflare のアカウント / ゾーン | どのアカウントにデプロイするか |
-| ドメイン | 独自ドメイン 2 つ | LP 用（例 `example.com`）とアプリ用（例 `app.example.com`）。`wrangler.toml` の `[[routes]]` と `LP_HOSTNAME` / `APP_HOSTNAME` はコメント・空のまま |
+| ドメイン | 取得済み | LP `goldencross-incomegains.com` / アプリ `app.goldencross-incomegains.com`。`wrangler.toml` の `[env.production]` に設定済み |
 | 設定 | `CF_ACCESS_TEAM_DOMAIN` / `CF_ACCESS_AUD` | Cloudflare Zero Trust のアプリケーション設定 |
 | GitHub | `CLOUDFLARE_API_TOKEN` / `CLOUDFLARE_ACCOUNT_ID` | バックフィルの Actions が使う |
 | データ | 過去の日足 | D1 の中身。リポジトリには入っていない（`DEPLOY.md` 手順 7 で入れる） |

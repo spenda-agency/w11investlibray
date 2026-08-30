@@ -69,48 +69,40 @@ npx wrangler secret put JQUANTS_API_KEY
 ## 5. デプロイする
 
 ```bash
-npx wrangler deploy
+npm run deploy          # = wrangler deploy --env production
 ```
 
-ドメインが未確定のうちは `workers_dev = true` のまま `*.workers.dev` で動く。
-このとき `/lp` が LP、`/` がダッシュボードになる。
+`wrangler.toml` は 2 段構成になっている。
 
-### ドメインが決まったら
+| | |
+|---|---|
+| 既定 | ルート無し・ホスト名は空。**ローカル開発用** |
+| `[env.production]` | 実ドメインのルートとホスト名 |
 
-**LP とアプリは別ホストにする。** 同じホストでパスだけ分けると、
-Access のポリシーをパス単位で書くことになり、ルートを 1 本足しただけで
-市場データが公開側に漏れる余地ができる。
+**必ず `--env production` を付けること。** 付け忘れるとルートの無い
+Worker が上がり、ドメインに反応しない。`npm run deploy` がそれを含んでいる。
 
-1. Cloudflare にゾーンを追加し、DNS に 2 つのレコードを作る
-   （Worker のルートに載せるので、内容は proxied な `AAAA ::` か
-   ダミーの `A 192.0.2.1` でよい。**必ずプロキシを有効（オレンジ雲）にする**）
+### DNS
 
-   | 名前 | 用途 |
-   |---|---|
-   | `@`（`example.com`） | LP |
-   | `app` | ダッシュボード |
+Cloudflare の DNS に 2 つのレコードを作る。Worker のルートに載せるので、
+内容は proxied な `AAAA ::` かダミーの `A 192.0.2.1` でよい。
+**必ずプロキシを有効（オレンジ雲）にすること。** 灰色だと Worker を通らない。
 
-2. `wrangler.toml` を 2 か所直す
+| 名前 | ホスト | 用途 |
+|---|---|---|
+| `@` | `goldencross-incomegains.com` | LP（公開） |
+| `app` | `app.goldencross-incomegains.com` | ダッシュボード（Access の後ろ） |
 
-   ```toml
-   workers_dev = false
+`www` を使う場合は `www` も足し、`wrangler.toml` のコメントアウトしてある
+3 本目のルートを有効にする。Worker が apex へ 301 で寄せる。
 
-   [[routes]]
-   pattern = "example.com/*"
-   zone_name = "example.com"
-   [[routes]]
-   pattern = "app.example.com/*"
-   zone_name = "example.com"
+### workers.dev を有効にしないこと
 
-   [vars]
-   LP_HOSTNAME = "example.com"
-   APP_HOSTNAME = "app.example.com"
-   ```
-
-3. `npx wrangler deploy`
-
-**`LP_HOSTNAME` を空のままルートだけ張らないこと。** ホスト名が未設定だと
-`site.ts` がローカル扱いのままになり、LP のホストでもダッシュボードが出る。
+`workers_dev = false` にしてある。**戻さないこと。**
+Cloudflare Access はゾーンのホスト名に紐づくので、`*.workers.dev` から来た
+リクエストには適用されない。有効にすると、その URL でダッシュボードが
+認証なしに開く。`site.ts` も想定外のホストには 404 を返すが、
+そもそも口を開けないのが本筋。
 
 ### 公開の書き込み口を守る
 
@@ -119,7 +111,7 @@ Access のポリシーをパス単位で書くことになり、ルートを 1 �
 **本気の濫用対策は Cloudflare 側で行う。**
 
 Security → WAF → Rate limiting rules で、
-`example.com/api/waitlist` に対して「同一 IP から 10 分あたり 5 リクエスト」
+`goldencross-incomegains.com/api/waitlist` に対して「同一 IP から 10 分あたり 5 リクエスト」
 程度の規則を 1 本入れる。
 
 ---
@@ -183,15 +175,16 @@ curl -X POST "https://your-worker.workers.dev/api/run-pipeline"
 **ここをやるまで、ダッシュボードはだれでも見られる。**
 未設定のうちは画面上部に赤い警告が出るので、消えていることを確認する。
 
-**Access は `app.example.com` にだけ掛ける。** LP 側に掛けると
+**Access は `app.goldencross-incomegains.com` にだけ掛ける。** LP 側に掛けると
 先行登録が誰にも見えなくなる。
 
 1. Cloudflare ダッシュボード → Zero Trust → Access → Applications
-2. Self-hosted アプリケーションを追加し、**アプリ側のホスト**（`app.example.com`）を指定
+2. Self-hosted アプリケーションを追加し、**アプリ側のホスト**（`app.goldencross-incomegains.com`）を指定
 3. ポリシーで自分のメールアドレスを許可
 4. アプリケーションの **Audience (AUD) タグ**をコピー
-5. `wrangler.toml` の `CF_ACCESS_TEAM_DOMAIN`（`xxx.cloudflareaccess.com`）と
-   `CF_ACCESS_AUD` に設定して再デプロイ
+5. `wrangler.toml` の **`[env.production.vars]`** にある
+   `CF_ACCESS_TEAM_DOMAIN`（`xxx.cloudflareaccess.com`）と
+   `CF_ACCESS_AUD` に設定して `npm run deploy`
 
 `/api/health` だけは認証を通さない（監視から叩くため）。
 内部の数字は返さず、最後に成功した日付と遅れ日数だけを返す。
@@ -200,10 +193,20 @@ curl -X POST "https://your-worker.workers.dev/api/run-pipeline"
 
 ## うまくいかないとき
 
-### LP のホストなのにダッシュボードが出る
+### ローカルで LP しか開けない
 
-`LP_HOSTNAME` が空のまま。手順 5 の 2 を確認する。
-`site.ts` はホスト名が未設定だとローカル扱いになり、パスで振り分ける。
+`wrangler.toml` の**既定側**にルートやホスト名を書いてしまっている。
+`wrangler dev` は `[[routes]]` があると 1 本目のホスト名を模擬して
+リクエストを組み立てるため、`localhost` に投げても LP のホストとして届く
+（`Host:` ヘッダでは変えられない）。ルートとホスト名は
+`[env.production]` にだけ置くこと。`npm test` がこれを検査している。
+
+### ドメインに反応しない / 404 が返る
+
+- `--env production` を付けずにデプロイした → `npm run deploy` を使う
+- DNS レコードがプロキシ無効（灰色雲）→ オレンジ雲にする
+- ホスト名の綴りが `[env.production.vars]` と `[[env.production.routes]]` で
+  食い違っている → `npm test` が検出する
 
 ### 先行登録が保存されない
 

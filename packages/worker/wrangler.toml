@@ -3,21 +3,26 @@ main = "src/index.ts"
 compatibility_date = "2026-08-25"
 compatibility_flags = ["nodejs_compat"]
 
-# ドメインが確定するまでは workers.dev で動かす。
-# 確定したら workers_dev = false にして、下の [[routes]] を有効化する。
-# **差し替えるのはこのファイルのここだけ**で済むようにしてある。
-workers_dev = true
+# **workers.dev を有効にしないこと。**
+# Cloudflare Access はゾーンのホスト名に紐づくので、`*.workers.dev` から来た
+# リクエストには適用されない。有効にすると、そのURLでダッシュボードが
+# 認証なしに開いてしまう。site.ts 側でも想定外ホストは 404 にしてあるが、
+# そもそも口を開けない。
+workers_dev = false
 
-# ドメイン確定後にコメントを外す。**LP とアプリを別ホストに分ける。**
-# 同じホストでパスだけ分けると、Access のポリシーをパス単位で書くことになり、
-# ルートを 1 本足しただけで市場データが公開側に漏れる余地ができる。
+# ============================================================
+# 既定（ローカル開発）
+# ============================================================
+# **ここにルートとホスト名を書かない。**
+# `wrangler dev` は routes が設定されていると、その 1 本目のホスト名を
+# 模擬してリクエストを組み立てる。本番のホスト名を既定に置くと、
+# ローカルで LP しか開けなくなる（実際にそうなった）。
 #
-# [[routes]]                       # LP（公開）
-# pattern = "example.com/*"
-# zone_name = "example.com"
-# [[routes]]                       # ダッシュボード（Access の後ろ）
-# pattern = "app.example.com/*"
-# zone_name = "example.com"
+# ホスト名が空だと site.ts がパスで振り分けるので、
+# `/lp` 配下が LP、それ以外がダッシュボードとして両方確認できる。
+#
+# 本番の設定は下の [env.production]。デプロイは:
+#   npm run deploy        （= wrangler deploy --env production）
 
 [[d1_databases]]
 binding = "INVEST_DB"
@@ -40,9 +45,7 @@ enabled = true
 
 [vars]
 SITE_NAME = "Invest Library"
-# LP とダッシュボードのホスト名。**両方空のあいだはローカル扱い**で、
-# `/lp` 配下が LP、それ以外がダッシュボードになる（site.ts）。
-# ドメインが決まったらここと [[routes]] を埋める。
+# 空 = ローカル扱い。`/lp` 配下が LP、それ以外がダッシュボード（site.ts）。
 LP_HOSTNAME = ""
 APP_HOSTNAME = ""
 # Phase 1 の対象市場。Phase 3 以降はここに 'US' などを足す。
@@ -51,26 +54,75 @@ MARKETS = "JP"
 UNIVERSE_LIMIT = "500"
 # ニュース分析に使うモデル（Phase 1b）。
 NEWS_MODEL = "claude-opus-5"
-
-# --- 会員機能 ---
 # **"true" にする前に docs/DATA-SOURCES.md の「再配信の可否」を埋めること。**
-# 市場データを登録ユーザーへ提供することが契約上の第三者提供に当たるかを
-# 確認するまで、ここは "false" のままにする。
 MEMBER_SIGNUP_ENABLED = "false"
-
-# --- Cloudflare Access ---
 # 両方を設定すると、リクエストごとに Access の JWT を検証する。
-# 空なら検証しない（ローカル開発用）。本番では必ず設定すること。
+# ローカルは空でよい（画面上部に警告が出る）。
 CF_ACCESS_TEAM_DOMAIN = ""
 CF_ACCESS_AUD = ""
-
-# --- J-Quants ---
 JQUANTS_BASE_URL = "https://api.jquants.com/v2"
 # API の項目名が変わったときの逃げ道。コードを直さずここで別名を足せる。
 # 例: {"close":["C","Close","ClosePrice"]}
 # `npm run check:datasource` が実際に返ってきた項目名を表示する。
 JQUANTS_FIELD_ALIASES = "{}"
 
-# --- Secrets（wrangler secret put で登録。このファイルには書かないこと）---
+# ============================================================
+# 本番
+# ============================================================
+# **LP とアプリを別ホストに分けている。**
+# 同じホストでパスだけ分けると、Access のポリシーをパス単位で書くことになり、
+# ルートを 1 本足しただけで市場データが公開側に漏れる余地ができる。
+#
+# wrangler は名前付き環境へ vars / d1 / r2 / triggers を**引き継がない**ので、
+# 下は既定の写しになっている。ずれると本番だけ壊れるため、
+# `test/wrangler.test.mjs` が両者の項目の一致を検査している。
+
+[env.production]
+workers_dev = false
+
+[[env.production.routes]]                          # LP（公開）
+pattern = "goldencross-incomegains.com/*"
+zone_name = "goldencross-incomegains.com"
+
+[[env.production.routes]]                          # ダッシュボード（Access の後ろ）
+pattern = "app.goldencross-incomegains.com/*"
+zone_name = "goldencross-incomegains.com"
+
+# www を使うなら足す。Worker が apex へ 301 で寄せる。
+# [[env.production.routes]]
+# pattern = "www.goldencross-incomegains.com/*"
+# zone_name = "goldencross-incomegains.com"
+
+[[env.production.d1_databases]]
+binding = "INVEST_DB"
+database_name = "invest-db"
+database_id = "REPLACE_WITH_D1_DATABASE_ID"
+
+[[env.production.r2_buckets]]
+binding = "INVEST_R2"
+bucket_name = "invest-snapshots"
+
+[env.production.triggers]
+crons = ["30 10 * * 1-5", "0 22 * * 0-4"]
+
+[env.production.observability]
+enabled = true
+
+[env.production.vars]
+SITE_NAME = "Invest Library"
+LP_HOSTNAME = "goldencross-incomegains.com"
+APP_HOSTNAME = "app.goldencross-incomegains.com"
+MARKETS = "JP"
+UNIVERSE_LIMIT = "500"
+NEWS_MODEL = "claude-opus-5"
+MEMBER_SIGNUP_ENABLED = "false"
+# **Cloudflare Access のアプリケーションを作ったら埋める。**
+# 空のままだと画面上部に赤い警告が出る（docs/DEPLOY.md 手順 9）。
+CF_ACCESS_TEAM_DOMAIN = ""
+CF_ACCESS_AUD = ""
+JQUANTS_BASE_URL = "https://api.jquants.com/v2"
+JQUANTS_FIELD_ALIASES = "{}"
+
+# --- Secrets（wrangler secret put --env production で登録。ここには書かない）---
 # JQUANTS_API_KEY   : J-Quants の API キー
 # ANTHROPIC_API_KEY : ニュース分析用（Phase 1b）

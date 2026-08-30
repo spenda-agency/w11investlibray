@@ -51,8 +51,8 @@ docs/             設計・スコア定義・データソースの利用条件
 
 | ホスト | 中身 | 認証 |
 |---|---|---|
-| `example.com` | LP（サービス紹介と先行登録） | なし。市場データを一切返さない |
-| `app.example.com` | ダッシュボード | Cloudflare Access |
+| `goldencross-incomegains.com` | LP（サービス紹介と先行登録） | なし。市場データを一切返さない |
+| `app.goldencross-incomegains.com` | ダッシュボード | Cloudflare Access |
 
 ローカルでは `/lp` が LP、`/` がダッシュボード。
 

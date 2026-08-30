@@ -3,7 +3,10 @@ export interface Env {
   INVEST_R2: R2Bucket;
 
   // vars
+  /** 正式名。LP の <title> と og:title に使う。 */
   SITE_NAME: string;
+  /** 短縮名。ヘッダーとダッシュボードの <title> に使う。 */
+  SITE_SHORT_NAME: string;
   /** LP を出すホスト名。空ならローカル扱いで `/lp` 配下に出る。 */
   LP_HOSTNAME: string;
   /** ダッシュボードを出すホスト名。Cloudflare Access はこちらに掛ける。 */

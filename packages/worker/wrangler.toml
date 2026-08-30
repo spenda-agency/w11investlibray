@@ -44,7 +44,11 @@ crons = ["30 10 * * 1-5", "0 22 * * 0-4"]
 enabled = true
 
 [vars]
-SITE_NAME = "Invest Library"
+# 正式名。LP の <title> と og:title、プライバシーポリシーの見出しに使う。
+SITE_NAME = "ゴールデンクロスーインカムゲインを究める資産運用"
+# 短縮名。ヘッダーのブランド表記と、ダッシュボードの <title> の接尾辞。
+# 正式名は 24 文字あり、ヘッダーに入れると狭い画面で折り返す。
+SITE_SHORT_NAME = "ゴールデンクロス"
 # 空 = ローカル扱い。`/lp` 配下が LP、それ以外がダッシュボード（site.ts）。
 LP_HOSTNAME = ""
 APP_HOSTNAME = ""
@@ -109,7 +113,8 @@ crons = ["30 10 * * 1-5", "0 22 * * 0-4"]
 enabled = true
 
 [env.production.vars]
-SITE_NAME = "Invest Library"
+SITE_NAME = "ゴールデンクロスーインカムゲインを究める資産運用"
+SITE_SHORT_NAME = "ゴールデンクロス"
 LP_HOSTNAME = "goldencross-incomegains.com"
 APP_HOSTNAME = "app.goldencross-incomegains.com"
 MARKETS = "JP"

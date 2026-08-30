@@ -44,7 +44,7 @@ test('tokens.ts は明暗の両方を定義している', () => {
 
 test('LP とダッシュボードが同じパレットを配信する', () => {
   const app = layout({ title: 't', siteName: 's', body: '<p>x</p>' });
-  const lp = lpPage({ siteName: 's', basePath: '', appUrl: '/' });
+  const lp = lpPage({ siteName: 's', shortName: 's', basePath: '', appUrl: '/' });
   for (const page of [app, lp]) {
     assert.ok(page.includes('--accent: #'), 'パレットが出力に含まれていない');
     assert.ok(page.includes(FONT_STACK), '書体が出力に含まれていない');
@@ -55,7 +55,7 @@ test('LP とダッシュボードが同じパレットを配信する', () => {
 });
 
 test('パレットは 1 ページにつき 1 回だけ出る', () => {
-  const lp = lpPage({ siteName: 's', basePath: '', appUrl: '/' });
+  const lp = lpPage({ siteName: 's', shortName: 's', basePath: '', appUrl: '/' });
   const count = (lp.match(/--accent:\s*#/g) ?? []).length;
   // ライト 1 回 + ダーク 1 回
   assert.equal(count, 2, `--accent の定義が ${count} 回出ている`);

@@ -133,7 +133,7 @@ test('プライバシーポリシーは未記入箇所が分かるようにな�
 });
 
 test('ハニーポットは画面外に隠れている', () => {
-  const html = lpPage({ siteName: 'X', basePath: '', appUrl: '/' });
+  const html = lpPage({ siteName: 'X', shortName: 'X', basePath: '', appUrl: '/' });
   assert.match(html, /class="hp"/);
   assert.match(html, /name="company"/);
   assert.match(html, /\.hp \{[^}]*left: -9999px/, '見えない位置に置く CSS が要る');
@@ -374,4 +374,50 @@ test('本番のホスト名を設定していても localhost では開発用に
   assert.equal(resolveSite(new URL('http://localhost:8787/lp'), env).site, 'lp');
   assert.equal(resolveSite(new URL('http://127.0.0.1:8787/screener'), env).site, 'app');
   assert.equal(resolveSite(new URL('http://app.localhost:8787/'), env).site, 'app');
+});
+
+// ---- 長いサイト名の扱い -----------------------------------------------------
+
+test('LP の title は正式名だけで、検索結果に収まる長さ', () => {
+  // 正式名は 24 文字。ここにキャッチコピーを足すと 42 文字になり、
+  // 検索結果（全角 30 文字前後で切られる）で後半が丸ごと消える。
+  const full = 'ゴールデンクロスーインカムゲインを究める資産運用';
+  const html = lpPage({ siteName: full, shortName: 'ゴールデンクロス', basePath: '', appUrl: '/' });
+  const title = /<title>([^<]*)<\/title>/.exec(html)?.[1];
+  assert.equal(title, full, 'title は正式名だけにする');
+  assert.ok(title.length <= 32, `title が ${title.length} 文字ある`);
+});
+
+test('LP のヘッダーには短縮名が出る', () => {
+  const html = lpPage({
+    siteName: 'ゴールデンクロスーインカムゲインを究める資産運用',
+    shortName: 'ゴールデンクロス',
+    basePath: '',
+    appUrl: '/',
+  });
+  const brand = /<span class="brand">([^<]*)<\/span>/.exec(html)?.[1];
+  assert.equal(brand, 'ゴールデンクロス', '狭い画面で折り返さないよう短縮名を使う');
+});
+
+test('og:title は正式名（共有時に何のサービスか分かるように）', () => {
+  const full = 'ゴールデンクロスーインカムゲインを究める資産運用';
+  const html = lpPage({ siteName: full, shortName: '短', basePath: '', appUrl: '/' });
+  assert.ok(html.includes(`<meta property="og:title" content="${full}">`));
+});
+
+test('ダッシュボードの title とヘッダーは短縮名', async () => {
+  const env = makeEnv(HOSTS);
+  const html = await (await handler.fetch(req('https://app.invest.example/'), env, ctx)).text();
+  const title = /<title>([^<]*)<\/title>/.exec(html)?.[1];
+  assert.match(title, /ゴールデンクロス$/);
+  assert.ok(title.length <= 32, `title が ${title.length} 文字ある`);
+  assert.ok(!title.includes('資産運用'), 'ダッシュボードのタブに正式名を出さない');
+});
+
+test('プライバシーポリシーの title も短縮名で組む', async () => {
+  const env = makeEnv(HOSTS);
+  const html = await (await handler.fetch(req('https://invest.example/privacy'), env, ctx)).text();
+  const title = /<title>([^<]*)<\/title>/.exec(html)?.[1];
+  assert.equal(title, 'プライバシーポリシー — ゴールデンクロス');
+  assert.ok(title.length <= 32, `title が ${title.length} 文字ある`);
 });

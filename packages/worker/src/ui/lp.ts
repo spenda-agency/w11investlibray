@@ -15,7 +15,10 @@ import { FONT_STACK, TOKENS } from './tokens.js';
  */
 
 export interface LpOptions {
+  /** 正式名。<title> と og:title に使う。 */
   readonly siteName: string;
+  /** 短縮名。ヘッダーのブランド表記に使う。 */
+  readonly shortName: string;
   readonly basePath: string;
   readonly appUrl: string;
   /** LP の絶対 URL。canonical と OGP に使う。ローカルでは空。 */
@@ -32,7 +35,12 @@ export function lpPage(o: LpOptions): string {
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>${escapeHtml(o.siteName)} — 毎日、全銘柄を同じ物差しで測る</title>
+<!--
+  正式名だけを入れる。キャッチコピーを足すと 42 文字になり、
+  検索結果（全角 30 文字前後で切られる）で後半が丸ごと消える。
+  正式名自体が「インカムゲインを究める資産運用」と中身を説明している。
+-->
+<title>${escapeHtml(o.siteName)}</title>
 <meta name="description" content="5,000 銘柄を毎日機械的にスクリーニングし、条件に合致した候補とその根拠を 1 画面に集約する投資判断支援システム。先行登録を受け付けています。">
 <meta property="og:title" content="${escapeHtml(o.siteName)}">
 <meta property="og:description" content="毎日、全銘柄を同じ物差しで測る。条件に合致した候補と、その根拠まで。">
@@ -49,7 +57,7 @@ export function lpPage(o: LpOptions): string {
 <body>
 
 <header class="lp-head">
-  <span class="brand">${escapeHtml(o.siteName)}</span>
+  <span class="brand">${escapeHtml(o.shortName)}</span>
   <a class="quiet" href="${escapeHtml(o.appUrl)}">ログイン</a>
 </header>
 

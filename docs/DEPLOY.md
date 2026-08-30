@@ -82,19 +82,46 @@ npm run deploy          # = wrangler deploy --env production
 **必ず `--env production` を付けること。** 付け忘れるとルートの無い
 Worker が上がり、ドメインに反応しない。`npm run deploy` がそれを含んでいる。
 
-### DNS
+### DNS — A レコードは必要。ただし IP の中身は使われない
 
-Cloudflare の DNS に 2 つのレコードを作る。Worker のルートに載せるので、
-内容は proxied な `AAAA ::` かダミーの `A 192.0.2.1` でよい。
-**必ずプロキシを有効（オレンジ雲）にすること。** 灰色だと Worker を通らない。
+「レコードの追加」で **タイプ `A`、IPv4 アドレス `192.0.2.1`、プロキシ オン**
+を 2 本作る。
 
-| 名前 | ホスト | 用途 |
-|---|---|---|
-| `@` | `goldencross-incomegains.com` | LP（公開） |
-| `app` | `app.goldencross-incomegains.com` | ダッシュボード（Access の後ろ） |
+| 名前 | タイプ | IPv4 アドレス | プロキシ |
+|---|---|---|---|
+| `@` | A | `192.0.2.1` | **オン（オレンジ雲）** |
+| `app` | A | `192.0.2.1` | **オン（オレンジ雲）** |
 
-`www` を使う場合は `www` も足し、`wrangler.toml` のコメントアウトしてある
-3 本目のルートを有効にする。Worker が apex へ 301 で寄せる。
+**なぜ必要か。** この構成は Workers の「ルート」方式
+（`wrangler.toml` の `pattern` + `zone_name`）。ルートが一致するのは
+リクエストが Cloudflare のエッジに届いてから。DNS レコードが無いと
+そもそも名前が引けず、エッジに届かないのでルートが一致しない。
+
+**なぜ IP は何でもよいか。** Worker はオリジンへ行く前に応答するので、
+レコードの指す先は使われない。`192.0.2.1` は RFC 5737 の
+ドキュメント用予約アドレスで、実在のホストを指さない。
+`AAAA` に `100::` を入れる流儀も同じ理由で使える。
+
+**プロキシは必ずオンにすること。** 灰色雲（DNS のみ）だと
+Cloudflare を素通りして `192.0.2.1` へ行こうとし、Worker が動かない。
+Cloudflare Access も同じ理由でプロキシ有効が前提になる。
+
+`www` を使う場合は `www` も同じ要領で足し、`wrangler.toml` の
+コメントアウトしてある 3 本目のルートを有効にする。Worker が apex へ 301 で寄せる。
+
+> **別のやり方**: Workers の「カスタムドメイン」を使うと Cloudflare が
+> DNS を自動で作るので、A レコードを手で足す必要がなくなる。
+> ただし現在の設定はルート方式で、テストもそれ前提で書いてある。
+> A レコードを 2 本足すほうが早い。
+
+#### 通ったかの確認
+
+```bash
+curl -sI https://goldencross-incomegains.com/ | grep -iE 'HTTP/|cf-ray|server'
+```
+
+`cf-ray` ヘッダが付いていれば Cloudflare を通っている。
+`HTTP/2 200` なら Worker が応答している。
 
 ### workers.dev を有効にしないこと
 

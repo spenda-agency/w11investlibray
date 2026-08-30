@@ -3,6 +3,7 @@ import { FONT_STACK, TOKENS } from './tokens.js';
 
 export interface LayoutOptions {
   readonly title: string;
+  /** ヘッダーと <title> の接尾辞。**短縮名を渡す**（正式名は 24 文字あり長い）。 */
   readonly siteName: string;
   readonly body: string;
   /** Access が未設定のまま本番に出ていないか、画面上で気付けるようにする。 */

@@ -40,7 +40,7 @@ export async function handleDashboard(env: Env): Promise<Response> {
   return html(
     layout({
       title: '本日の候補',
-      siteName: env.SITE_NAME,
+      siteName: env.SITE_SHORT_NAME,
       body: dashboardPage(data),
       accessWarning: !isAccessConfigured(env),
       sampleData: sample,
@@ -76,7 +76,7 @@ export async function handleScreener(env: Env, url: URL): Promise<Response> {
   return html(
     layout({
       title: 'スクリーナー',
-      siteName: env.SITE_NAME,
+      siteName: env.SITE_SHORT_NAME,
       body: screenerPage({
         date,
         rows,
@@ -94,7 +94,7 @@ export async function handleSymbolPage(env: Env, symbolId: string): Promise<Resp
   const date = await latestScoredDate(env.INVEST_DB);
   if (date === null) {
     return html(
-      layout({ title: '銘柄', siteName: env.SITE_NAME, body: notFoundPage('データがありません。'), activeNav: null }),
+      layout({ title: '銘柄', siteName: env.SITE_SHORT_NAME, body: notFoundPage('データがありません。'), activeNav: null }),
       404,
     );
   }
@@ -104,7 +104,7 @@ export async function handleSymbolPage(env: Env, symbolId: string): Promise<Resp
     return html(
       layout({
         title: '銘柄',
-        siteName: env.SITE_NAME,
+        siteName: env.SITE_SHORT_NAME,
         body: notFoundPage(`銘柄 ${symbolId} のスコアが見つかりません。`),
         accessWarning: !isAccessConfigured(env),
         activeNav: null,
@@ -135,7 +135,7 @@ export async function handleSymbolPage(env: Env, symbolId: string): Promise<Resp
   return html(
     layout({
       title: detail.ranking.name,
-      siteName: env.SITE_NAME,
+      siteName: env.SITE_SHORT_NAME,
       sampleData: await hasSampleData(env.INVEST_DB),
       body: symbolPage({
         row: detail.ranking,

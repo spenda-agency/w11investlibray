@@ -91,7 +91,8 @@ export function makeEnv(overrides = {}) {
   return {
     INVEST_DB: new FakeD1(SCHEMA_PATH, WAITLIST_SCHEMA_PATH),
     INVEST_R2: new FakeR2(),
-    SITE_NAME: 'Invest Library',
+    SITE_NAME: 'ゴールデンクロスーインカムゲインを究める資産運用',
+    SITE_SHORT_NAME: 'ゴールデンクロス',
     LP_HOSTNAME: '',
     APP_HOSTNAME: '',
     MARKETS: 'JP',

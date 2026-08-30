@@ -75,6 +75,7 @@ npm run dev                                 # http://localhost:8787/
 |---|---|
 | 今ある画面と URL | `packages/worker/src/routes/ui.ts`、`README.md` |
 | 画面に出す項目の実体 | `packages/worker/src/types.ts` の `RankingRow` |
+| サイト名 | `wrangler.toml` の `SITE_NAME`（正式名）と `SITE_SHORT_NAME`（ヘッダー用） |
 | 現在の配色・タイポグラフィ | `packages/worker/src/ui/tokens.ts`（**パレットの唯一の定義**。light / dark 両対応） |
 | 画面文言の考え方 | `SCORING.md`（「推奨」ではなく「条件合致」など） |
 | 実際の見た目 | `npm run dev` で起動して確認できる |

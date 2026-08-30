@@ -22,6 +22,7 @@ export async function handleLpRequest(
     return html(
       lpPage({
         siteName: env.SITE_NAME,
+        shortName: env.SITE_SHORT_NAME,
         basePath: base,
         appUrl: target,
         ...(canonical.startsWith('https://') ? { canonicalUrl: canonical } : {}),
@@ -59,6 +60,7 @@ export async function handleLpRequest(
       return html(
         lpPage({
           siteName: env.SITE_NAME,
+          shortName: env.SITE_SHORT_NAME,
           basePath: base,
           appUrl: target,
           submitted: ok ? 'ok' : null,
@@ -71,7 +73,8 @@ export async function handleLpRequest(
   }
 
   if (path === '/privacy') {
-    return html(privacyPage(env.SITE_NAME, base));
+    // 「{ページ名} — {短縮名}」に揃える。正式名だと 35 文字になる。
+    return html(privacyPage(env.SITE_SHORT_NAME, base));
   }
 
   return html(`<!doctype html><html lang="ja"><head><meta charset="utf-8">

@@ -43,10 +43,10 @@ function normalise(v) {
 }
 
 export class FakeD1 {
-  constructor(schemaPath) {
+  constructor(...schemaPaths) {
     this.db = new DatabaseSync(':memory:');
     this.db.exec('PRAGMA foreign_keys = ON');
-    this.db.exec(readFileSync(schemaPath, 'utf8'));
+    for (const p of schemaPaths) this.db.exec(readFileSync(p, 'utf8'));
   }
   prepare(sql) {
     return new Stmt(this.db, sql);
@@ -83,12 +83,17 @@ export class FakeR2 {
 export const SCHEMA_PATH = fileURLToPath(
   new URL('../../../../migrations/0001_init.sql', import.meta.url),
 );
+export const WAITLIST_SCHEMA_PATH = fileURLToPath(
+  new URL('../../../../migrations/0002_waitlist.sql', import.meta.url),
+);
 
 export function makeEnv(overrides = {}) {
   return {
-    INVEST_DB: new FakeD1(SCHEMA_PATH),
+    INVEST_DB: new FakeD1(SCHEMA_PATH, WAITLIST_SCHEMA_PATH),
     INVEST_R2: new FakeR2(),
     SITE_NAME: 'Invest Library',
+    LP_HOSTNAME: '',
+    APP_HOSTNAME: '',
     MARKETS: 'JP',
     UNIVERSE_LIMIT: '500',
     NEWS_MODEL: 'test-model',

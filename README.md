@@ -41,11 +41,20 @@ AI（Claude）の役割はニュースの分類・要約・説明であって、
 
 ```
 packages/core     依存ゼロの純TypeScript。指標・シグナル・スコア・バックテスト
-packages/worker   Cloudflare Worker。取得・保存・API・画面・日次Cron
+packages/worker   Cloudflare Worker。取得・保存・API・画面・日次Cron・公開LP
 packages/batch    Node CLI。バックフィルとバックテスト（GitHub Actions から）
 migrations/       D1 スキーマ
 docs/             設計・スコア定義・データソースの利用条件
 ```
+
+公開する面は 2 つに分かれている。
+
+| ホスト | 中身 | 認証 |
+|---|---|---|
+| `example.com` | LP（サービス紹介と先行登録） | なし。市場データを一切返さない |
+| `app.example.com` | ダッシュボード | Cloudflare Access |
+
+ローカルでは `/lp` が LP、`/` がダッシュボード。
 
 **指標の計算コードは `packages/core` の 1 本しかない。**
 日次パイプライン（Workers）とバックテスト（Node）が同じコードを呼ぶので、

@@ -8,11 +8,15 @@ compatibility_flags = ["nodejs_compat"]
 # **差し替えるのはこのファイルのここだけ**で済むようにしてある。
 workers_dev = true
 
-# [[routes]]
-# pattern = "example.com/"
-# zone_name = "example.com"
-# [[routes]]
+# ドメイン確定後にコメントを外す。**LP とアプリを別ホストに分ける。**
+# 同じホストでパスだけ分けると、Access のポリシーをパス単位で書くことになり、
+# ルートを 1 本足しただけで市場データが公開側に漏れる余地ができる。
+#
+# [[routes]]                       # LP（公開）
 # pattern = "example.com/*"
+# zone_name = "example.com"
+# [[routes]]                       # ダッシュボード（Access の後ろ）
+# pattern = "app.example.com/*"
 # zone_name = "example.com"
 
 [[d1_databases]]
@@ -36,6 +40,11 @@ enabled = true
 
 [vars]
 SITE_NAME = "Invest Library"
+# LP とダッシュボードのホスト名。**両方空のあいだはローカル扱い**で、
+# `/lp` 配下が LP、それ以外がダッシュボードになる（site.ts）。
+# ドメインが決まったらここと [[routes]] を埋める。
+LP_HOSTNAME = ""
+APP_HOSTNAME = ""
 # Phase 1 の対象市場。Phase 3 以降はここに 'US' などを足す。
 MARKETS = "JP"
 # 対象銘柄数の上限。Phase 1 は 500。Phase 2 で外す。

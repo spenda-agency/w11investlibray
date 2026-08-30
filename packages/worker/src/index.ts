@@ -1,5 +1,7 @@
 import type { Env } from './types.js';
 import { authenticate, isMemberSignupEnabled } from './auth.js';
+import { resolveSite } from './site.js';
+import { handleLpRequest } from './routes/lp.js';
 import { handleHealth, handleRanking, handleRunPipeline, handleSymbol, json } from './routes/api.js';
 import { handleDashboard, handleScreener, handleSymbolPage } from './routes/ui.js';
 import { runDailyPipeline } from './jobs/dailyPipeline.js';
@@ -7,14 +9,27 @@ import { runDailyPipeline } from './jobs/dailyPipeline.js';
 /**
  * エントリポイント。
  *
- * 認証は `/api/health` だけ外す（監視から叩くため）。それ以外は
- * Cloudflare Access の背後に置く。会員機能は実装してあるが
- * `MEMBER_SIGNUP_ENABLED` で閉じてある（docs/DATA-SOURCES.md）。
+ * **まずホスト名で LP とアプリを分ける**（`site.ts`）。
+ *   - LP 側は誰でも見られる。市場データを一切返さない
+ *   - アプリ側は Cloudflare Access の背後。`/api/health` だけ認証を外す
+ *
+ * 会員機能は実装してあるが `MEMBER_SIGNUP_ENABLED` で閉じてある
+ * （docs/DATA-SOURCES.md）。
  */
 export default {
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
     const url = new URL(request.url);
-    const path = url.pathname.replace(/\/+$/, '') || '/';
+    const { site, path } = resolveSite(url, env);
+
+    // LP 側。認証は通さず、市場データにも触れない。
+    if (site === 'lp') {
+      try {
+        return await handleLpRequest(request, env, path);
+      } catch (err) {
+        console.error('lp', err);
+        return json({ error: '内部エラー' }, 500);
+      }
+    }
 
     // 監視用。ここだけ認証不要。内部の数字は返さない。
     if (path === '/api/health') return handleHealth(env);

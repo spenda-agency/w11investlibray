@@ -44,7 +44,7 @@ npm run dev                                 # http://localhost:8787/
 | Secret | `ANTHROPIC_API_KEY` | Phase 1b で使う |
 | ID | D1 の `database_id` | `wrangler d1 create` の出力。`wrangler.toml` に貼る（現在は `REPLACE_WITH_D1_DATABASE_ID`） |
 | アカウント | Cloudflare のアカウント / ゾーン | どのアカウントにデプロイするか |
-| ドメイン | 独自ドメイン | 未確定。`wrangler.toml` の `[[routes]]` はコメントアウトしてある |
+| ドメイン | 独自ドメイン 2 つ | LP 用（例 `example.com`）とアプリ用（例 `app.example.com`）。`wrangler.toml` の `[[routes]]` と `LP_HOSTNAME` / `APP_HOSTNAME` はコメント・空のまま |
 | 設定 | `CF_ACCESS_TEAM_DOMAIN` / `CF_ACCESS_AUD` | Cloudflare Zero Trust のアプリケーション設定 |
 | GitHub | `CLOUDFLARE_API_TOKEN` / `CLOUDFLARE_ACCOUNT_ID` | バックフィルの Actions が使う |
 | データ | 過去の日足 | D1 の中身。リポジトリには入っていない（`DEPLOY.md` 手順 7 で入れる） |
@@ -91,7 +91,15 @@ npm run dev                                 # http://localhost:8787/
 
 これは Claude Design ではなく `wrangler.toml` と Cloudflare ダッシュボードの作業。
 手順は `DEPLOY.md` の 3 と 5 と 9。**差し替えるのは `wrangler.toml` の
-`workers_dev` と `[[routes]]` の 1 箇所だけ**で済むようにしてある。
+`workers_dev`・`[[routes]]`・`LP_HOSTNAME` / `APP_HOSTNAME` だけ**で済むようにしてある。
+
+### 公開ページ（LP）について
+
+`packages/worker/src/ui/lp.ts` が LP、`src/routes/lp.ts` がその配線。
+**本文（コピー）はテンプレートが変わっても使い回せる**ように、
+見た目（`STYLES`）と本文を同じファイル内で分けて置いてある。
+Claude Design のテンプレートを当てるときは `STYLES` と各節のマークアップを
+差し替え、本文はそのまま持っていけばよい。
 
 ### 引き継ぎ先に渡すとよいもの
 

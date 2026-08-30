@@ -4,6 +4,10 @@ export interface Env {
 
   // vars
   SITE_NAME: string;
+  /** LP を出すホスト名。空ならローカル扱いで `/lp` 配下に出る。 */
+  LP_HOSTNAME: string;
+  /** ダッシュボードを出すホスト名。Cloudflare Access はこちらに掛ける。 */
+  APP_HOSTNAME: string;
   MARKETS: string;
   UNIVERSE_LIMIT: string;
   NEWS_MODEL: string;

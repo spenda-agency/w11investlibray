@@ -9,6 +9,7 @@ import {
   isAccessConfigured,
   isMemberSignupEnabled,
   runDailyPipeline,
+  selectRanking,
 } from '../.build/worker.mjs';
 import { makeEnv } from './helpers/d1.mjs';
 
@@ -314,4 +315,40 @@ test('本物のデータだけならサンプル警告は出ない', async () =>
   await seedOneDay(env);
   const html = await (await handler.fetch(get('/'), env, ctx)).text();
   assert.ok(!html.includes('サンプルデータです'));
+});
+
+test('スコアの版が 2 つある日でも銘柄が重複しない', async () => {
+  // scores_daily の主キーは (symbol_id, date, score_version)。
+  // Phase 1b で v2-full が入ったとき、版で絞らないと同じ銘柄が 2 行返る。
+  const env = makeEnv();
+  await seedOneDay(env);
+  await env.INVEST_DB.prepare(
+    `INSERT INTO scores_daily (symbol_id, date, score_version, total, c_trend, c_rsi, c_macd,
+       c_ma, c_volume, c_momentum, c_fundamental, c_news, verdict, entry_px, stop_px, target_px, rr)
+     VALUES ('JP.72030','2026-08-27','v2-full', 91, 20, 10, 15, 12, 10, 8, 9, 7, 'BUY_NOW', 2450, 2360, 2585, 1.5)`,
+  ).run();
+
+  const body = await (await handler.fetch(get('/api/ranking?limit=10'), env, ctx)).json();
+  assert.equal(body.ranking.length, 1, `重複している: ${JSON.stringify(body.ranking.map((r) => r.total))}`);
+  assert.equal(body.ranking[0].total, 91, '新しい版のスコアを返す');
+
+  const html = await (await handler.fetch(get('/'), env, ctx)).text();
+  const rows = (html.match(/<td class="rank">\d+<\/td>/g) ?? []).length;
+  assert.equal(rows, 1, `ダッシュボードにも重複が出ている: ${rows} 行`);
+});
+
+test('版を明示すれば古いスコアも引ける', async () => {
+  const env = makeEnv();
+  await seedOneDay(env);
+  await env.INVEST_DB.prepare(
+    `INSERT INTO scores_daily (symbol_id, date, score_version, total, verdict)
+     VALUES ('JP.72030','2026-08-27','v2-full', 91, 'BUY_NOW')`,
+  ).run();
+
+  const rows = await selectRanking(env.INVEST_DB, '2026-08-27', {
+    limit: 10,
+    scoreVersion: 'v1-technical',
+  });
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].total, 88, '指定した版のスコアが返る');
 });

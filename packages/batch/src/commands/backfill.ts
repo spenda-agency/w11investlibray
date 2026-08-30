@@ -77,13 +77,14 @@ export async function runBackfill(options: BackfillOptions): Promise<number> {
         client.numberOf(row, 'low') ?? close,
         close,
         client.numberOf(row, 'volume') ?? 0,
+        client.numberOf(row, 'turnover'),
         client.numberOf(row, 'adjustmentFactor') ?? 1,
       ]);
     }
     statements.push(
       ...insertStatements(
         'prices_daily',
-        ['symbol_id', 'date', 'open', 'high', 'low', 'close', 'volume', 'adjustment_factor'],
+        ['symbol_id', 'date', 'open', 'high', 'low', 'close', 'volume', 'turnover', 'adjustment_factor'],
         priceRows,
         { conflictTarget: 'symbol_id, date' },
       ),

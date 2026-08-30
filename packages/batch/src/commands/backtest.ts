@@ -49,7 +49,11 @@ export async function runBacktestCommand(options: BacktestOptions): Promise<numb
 
   for (const [symbolId, rows] of Object.entries(raw)) {
     if (!Array.isArray(rows) || rows.length < 60) continue;
-    const sorted = [...rows].sort((a, b) => a.date.localeCompare(b.date));
+    // 手で用意した JSON では turnover が欠けていることがある。
+    // バックテストは価格しか見ないので、欠けていれば null で補う。
+    const sorted = [...rows]
+      .map((r) => ({ ...r, turnover: r.turnover ?? null }))
+      .sort((a, b) => a.date.localeCompare(b.date));
     // **必ず分割調整してから回す。** 未調整のまま回すと分割日で誤爆する。
     const bars: Bar[] = applySplitAdjustment(sorted);
 

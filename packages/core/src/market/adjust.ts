@@ -13,6 +13,7 @@ import type { PriceRow } from './source.js';
  *
  * 入力は**日付の昇順**である前提。出力も同じ順序で返す。
  * 出来高は価格と逆向きに調整する（分割で株数は増える）。
+ * **売買代金は調整しない。** 価格 × 株数なので分割で不変。
  */
 export function applySplitAdjustment(rows: readonly PriceRow[]): PriceRow[] {
   const n = rows.length;

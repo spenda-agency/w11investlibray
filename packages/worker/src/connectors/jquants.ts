@@ -197,6 +197,7 @@ export class JquantsJpSource implements MarketDataSource {
         close,
         volume: this.client.optionalNumber(row, 'volume') ?? 0,
         adjustmentFactor: this.client.optionalNumber(row, 'adjustmentFactor') ?? 1,
+        turnover: this.client.optionalNumber(row, 'turnover'),
       });
     }
     return out;

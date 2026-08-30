@@ -77,6 +77,7 @@ function buildFixture(days = 120) {
         Low: round(price * 0.988),
         Close: round(price),
         Volume: 100000 + Math.round(Math.sin(i / 3) * 20000) + k * 5000,
+        TurnoverValue: Math.round(price * (100000 + k * 5000)),
         AdjustmentFactor: 1,
       };
     });
@@ -335,4 +336,98 @@ test('上場一覧から消えた銘柄は削除ではなく delisted_at が立�
   // 価格も残っている
   const prices = env.INVEST_DB.query('SELECT COUNT(*) AS n FROM prices_daily WHERE symbol_id = ?1', 'JP.13010');
   assert.ok(prices[0].n > 0, '廃止銘柄の価格も残す');
+});
+
+test('過去の足は銘柄ごとに lookback 本ずつ読む（先頭銘柄が枠を食い潰さない）', async () => {
+  // 10 年ぶんをバックフィルすると 1 銘柄 2,400 本を超える。
+  // グループ全体に LIMIT を掛けると、先頭の銘柄が枠を使い切って
+  // 後ろの銘柄が 0 件になり、**黙って候補から消える**。
+  const env = makeEnv();
+  const db = env.INVEST_DB;
+  const symbols = ['JP.10010', 'JP.20020', 'JP.30030'];
+  const lookback = 300;
+  const barsPerSymbol = 400;
+
+  for (const symbolId of symbols) {
+    await db
+      .prepare(
+        `INSERT INTO symbols (symbol_id, market, code, name, currency, updated_at)
+         VALUES (?1,'JP',?2,?2,'JPY','2026-01-01')`,
+      )
+      .bind(symbolId, symbolId.slice(3))
+      .run();
+  }
+
+  const start = Date.UTC(2024, 0, 1);
+  for (let i = 0; i < barsPerSymbol; i += 1) {
+    const date = new Date(start + i * 86400000).toISOString().slice(0, 10);
+    for (const symbolId of symbols) {
+      await db
+        .prepare(
+          `INSERT INTO prices_daily (symbol_id, date, open, high, low, close, volume, adjustment_factor)
+           VALUES (?1,?2,100,101,99,100,1000,1)`,
+        )
+        .bind(symbolId, date)
+        .run();
+    }
+  }
+  const asOf = new Date(start + (barsPerSymbol - 1) * 86400000).toISOString().slice(0, 10);
+
+  const loaded = await loadRecentBars(env.INVEST_DB, symbols, asOf, lookback);
+  for (const symbolId of symbols) {
+    const list = loaded.get(symbolId);
+    assert.ok(list !== undefined, `${symbolId} が 1 件も読めていない`);
+    assert.equal(list.length, lookback, `${symbolId}: ${list.length} 本`);
+    assert.equal(list[list.length - 1].date, asOf, `${symbolId}: 末尾が当日でない`);
+    for (let i = 1; i < list.length; i += 1) {
+      assert.ok(list[i - 1].date < list[i].date, `${symbolId}: 昇順でない`);
+    }
+  }
+});
+
+test('売買代金が保存され、ユニバース選定に使われる', async () => {
+  // スキーマに turnover 列があるのに誰も書いていなければ、
+  // 流動性の指標として終値 × 出来高で代用し続けることになる。
+  const env = makeEnv();
+  const fixture = buildFixture(60);
+  const result = await seedAndRun(env, fixture);
+
+  const rows = env.INVEST_DB.query(
+    'SELECT symbol_id, turnover FROM prices_daily WHERE date = ?1 ORDER BY symbol_id',
+    result.date,
+  );
+  assert.equal(rows.length, 3);
+  for (const r of rows) {
+    assert.ok(r.turnover !== null && r.turnover > 0, `${r.symbol_id}: turnover=${r.turnover}`);
+  }
+});
+
+test('売買代金が無いソースでも終値 × 出来高で順位付けできる', async () => {
+  const env = makeEnv();
+  const db = env.INVEST_DB;
+  const date = '2026-08-27';
+  // 安い高出来高 と 高い低出来高。売買代金は前者が大きい。
+  const rows = [
+    ['JP.11110', 100, 50000],
+    ['JP.22220', 5000, 100],
+  ];
+  for (const [symbolId, close, volume] of rows) {
+    await db
+      .prepare(
+        `INSERT INTO symbols (symbol_id, market, code, name, currency, updated_at)
+         VALUES (?1,'JP',?2,?2,'JPY','2026-01-01')`,
+      )
+      .bind(symbolId, symbolId.slice(3))
+      .run();
+    // turnover は NULL のまま入れる
+    await db
+      .prepare(
+        `INSERT INTO prices_daily (symbol_id, date, open, high, low, close, volume, adjustment_factor)
+         VALUES (?1, ?2, ?3, ?3, ?3, ?3, ?4, 1)`,
+      )
+      .bind(symbolId, date, close, volume)
+      .run();
+  }
+  const universe = await selectUniverse(db, 'JP', date, 10);
+  assert.deepEqual(universe, ['JP.11110', 'JP.22220'], `実測: ${universe.join(',')}`);
 });

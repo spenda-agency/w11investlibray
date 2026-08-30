@@ -20,6 +20,7 @@ export const FIELD_ALIASES: Readonly<Record<string, readonly string[]>> = {
   low: ['Low', 'L', 'AdjustmentLow'],
   close: ['Close', 'C', 'AdjustmentClose'],
   volume: ['Volume', 'V', 'Vo', 'AdjustmentVolume'],
+  turnover: ['TurnoverValue', 'TuVa', 'Turnover'],
   adjustmentFactor: ['AdjustmentFactor', 'AdjFa', 'AdjF'],
   companyName: ['CompanyName', 'Name', 'CoNm'],
   sector33: ['Sector33CodeName', 'Sector33Code', 'Sc33Nm'],

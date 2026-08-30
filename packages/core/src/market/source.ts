@@ -24,6 +24,13 @@ export interface PriceRow extends Bar {
   readonly symbolId: string;
   /** 分割調整係数。J-Quants の `AdjustmentFactor` をそのまま持つ。 */
   readonly adjustmentFactor: number;
+  /**
+   * 売買代金。取得できないソースでは `null`。
+   *
+   * 流動性は「終値 × 出来高」より売買代金のほうが正確（寄り引けや
+   * 特別気配で乖離する）。ユニバース選定がこれを見る。
+   */
+  readonly turnover: number | null;
 }
 
 export interface CalendarRow {

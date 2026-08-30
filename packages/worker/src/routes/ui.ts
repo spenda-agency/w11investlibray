@@ -115,7 +115,8 @@ export async function handleSymbolPage(env: Env, symbolId: string): Promise<Resp
 
   const score = await env.INVEST_DB.prepare(
     `SELECT score_version, c_trend, c_rsi, c_macd, c_ma, c_volume, c_momentum, c_fundamental, c_news
-     FROM scores_daily WHERE symbol_id = ?1 AND date = ?2 LIMIT 1`,
+     FROM scores_daily WHERE symbol_id = ?1 AND date = ?2
+     ORDER BY score_version DESC LIMIT 1`,
   )
     .bind(symbolId, detail.ranking.date)
     .first<Record<string, string | number | null>>();

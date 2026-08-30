@@ -54,6 +54,7 @@ function buildBars(symbol, dates) {
     price = symbol.base + symbol.drift * i + wave + (rand() - 0.5) * symbol.base * 0.012;
     const close = Math.max(1, Math.round(price * 10) / 10);
     const spread = close * 0.012;
+    const volume = Math.round(800_000 + Math.sin(i / 6) * 250_000 + rand() * 200_000);
     return {
       symbolId: `JP.${symbol.code}`,
       date,
@@ -61,7 +62,8 @@ function buildBars(symbol, dates) {
       high: round1(close + spread * rand()),
       low: round1(close - spread * rand()),
       close,
-      volume: Math.round(800_000 + Math.sin(i / 6) * 250_000 + rand() * 200_000),
+      volume,
+      turnover: Math.round(close * volume),
       adjustmentFactor: 1,
     };
   });
@@ -100,12 +102,13 @@ lines.push('');
 for (const s of SYMBOLS) {
   const bars = buildBars(s, dates);
   const values = bars.map(
-    (b) => `(${q(b.symbolId)},${q(b.date)},${b.open},${b.high},${b.low},${b.close},${b.volume},1.0)`,
+    (b) =>
+      `(${q(b.symbolId)},${q(b.date)},${b.open},${b.high},${b.low},${b.close},${b.volume},${b.turnover},1.0)`,
   );
   // 1 文が長くなりすぎないよう 60 行ずつに割る
   for (let i = 0; i < values.length; i += 60) {
     lines.push(
-      'INSERT INTO prices_daily (symbol_id, date, open, high, low, close, volume, adjustment_factor) VALUES\n  ' +
+      'INSERT INTO prices_daily (symbol_id, date, open, high, low, close, volume, turnover, adjustment_factor) VALUES\n  ' +
         values.slice(i, i + 60).join(',\n  ') +
         ';',
     );

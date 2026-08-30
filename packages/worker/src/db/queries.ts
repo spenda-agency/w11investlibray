@@ -58,16 +58,20 @@ export async function upsertPrices(db: D1Database, rows: readonly PriceRow[]): P
   if (rows.length === 0) return 0;
   const stmt = db.prepare(
     `INSERT INTO prices_daily (symbol_id, date, open, high, low, close, volume, turnover, adjustment_factor)
-     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, NULL, ?8)
+     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
      ON CONFLICT (symbol_id, date) DO UPDATE SET
        open = excluded.open, high = excluded.high, low = excluded.low,
        close = excluded.close, volume = excluded.volume,
+       turnover = excluded.turnover,
        adjustment_factor = excluded.adjustment_factor`,
   );
   await runBatched(
     db,
     rows.map((r) =>
-      stmt.bind(r.symbolId, r.date, r.open, r.high, r.low, r.close, r.volume, r.adjustmentFactor),
+      stmt.bind(
+        r.symbolId, r.date, r.open, r.high, r.low, r.close, r.volume,
+        r.turnover, r.adjustmentFactor,
+      ),
     ),
   );
   return rows.length;
@@ -83,7 +87,10 @@ export async function upsertCalendar(db: D1Database, rows: readonly CalendarRow[
   return rows.length;
 }
 
-/** 対象ユニバース。Phase 1 は売買代金の代わりに直近出来高で上位を採る。 */
+/**
+ * 対象ユニバース。売買代金の大きい順に上位を採る。
+ * 売買代金が取れないソース（Phase 3 以降の市場）では終値 × 出来高で代用する。
+ */
 export async function selectUniverse(
   db: D1Database,
   market: string,
@@ -96,7 +103,7 @@ export async function selectUniverse(
        FROM prices_daily p
        JOIN symbols s ON s.symbol_id = p.symbol_id
        WHERE s.market = ?1 AND s.delisted_at IS NULL AND p.date = ?2
-       ORDER BY (p.close * p.volume) DESC
+       ORDER BY COALESCE(p.turnover, p.close * p.volume) DESC
        LIMIT ?3`,
     )
     .bind(market, asOf, limit)
@@ -107,6 +114,11 @@ export async function selectUniverse(
 /**
  * 指標計算に必要なぶんだけ過去の足を読む。
  * SMA200 と 52 週高値のために 300 営業日ぶん取る。
+ *
+ * **銘柄ごとに `lookback` 本ずつ**取る（ウィンドウ関数で区切る）。
+ * グループ全体に LIMIT を掛けると、履歴の長い先頭の銘柄が枠を使い切って
+ * 後ろの銘柄が 0 件になり、黙って候補から消える。日足が数百本しか無いうちは
+ * 表面化せず、10 年ぶんをバックフィルした瞬間に効いてくる。
  */
 export async function loadRecentBars(
   db: D1Database,
@@ -119,18 +131,23 @@ export async function loadRecentBars(
     const placeholders = group.map((_, i) => `?${i + 3}`).join(', ');
     const res = await db
       .prepare(
-        `SELECT symbol_id, date, open, high, low, close, volume, adjustment_factor
-         FROM prices_daily
-         WHERE date <= ?1 AND symbol_id IN (${placeholders})
-         ORDER BY symbol_id ASC, date DESC
-         LIMIT ?2`,
+        `WITH ranked AS (
+           SELECT symbol_id, date, open, high, low, close, volume, turnover, adjustment_factor,
+                  ROW_NUMBER() OVER (PARTITION BY symbol_id ORDER BY date DESC) AS rn
+           FROM prices_daily
+           WHERE date <= ?1 AND symbol_id IN (${placeholders})
+         )
+         SELECT symbol_id, date, open, high, low, close, volume, turnover, adjustment_factor
+         FROM ranked
+         WHERE rn <= ?2
+         ORDER BY symbol_id ASC, date ASC`,
       )
-      .bind(asOf, lookback * group.length, ...group)
+      .bind(asOf, lookback, ...group)
       .all<PriceRowDb>();
 
+    // 昇順で読んでいる。指標は昇順を前提にしているので、ここで並べ替えない。
     for (const row of res.results ?? []) {
       const list = out.get(row.symbol_id) ?? [];
-      if (list.length >= lookback) continue;
       list.push({
         symbolId: row.symbol_id,
         date: row.date,
@@ -139,13 +156,12 @@ export async function loadRecentBars(
         low: row.low,
         close: row.close,
         volume: row.volume,
+        turnover: row.turnover,
         adjustmentFactor: row.adjustment_factor,
       });
       out.set(row.symbol_id, list);
     }
   }
-  // DESC で読んだので昇順へ戻す。指標は昇順を前提にしている。
-  for (const list of out.values()) list.reverse();
   return out;
 }
 
@@ -157,6 +173,7 @@ interface PriceRowDb {
   low: number;
   close: number;
   volume: number;
+  turnover: number | null;
   adjustment_factor: number;
 }
 
@@ -277,14 +294,35 @@ export async function upsertScores(db: D1Database, rows: readonly ScoreInsert[])
   return rows.length;
 }
 
-/** ランキング。画面と API が同じクエリを通る。 */
+/**
+ * ランキング。画面と API が同じクエリを通る。
+ *
+ * **`score_version` で必ず 1 つに絞る。** `scores_daily` の主キーは
+ * (symbol_id, date, score_version) なので、Phase 1b で v2-full が入ると
+ * 絞らないかぎり同じ銘柄が 2 行返る。既定はその日にある最新版
+ * （`docs/SCORING.md` の版番号は辞書順で並ぶ約束）。
+ */
 export async function selectRanking(
   db: D1Database,
   date: string,
-  options: { limit: number; verdict?: string | undefined; sector?: string | undefined; minTotal?: number | undefined },
+  options: {
+    limit: number;
+    verdict?: string | undefined;
+    sector?: string | undefined;
+    minTotal?: number | undefined;
+    scoreVersion?: string | undefined;
+  },
 ): Promise<RankingRow[]> {
   const conditions = ['sc.date = ?1'];
   const binds: unknown[] = [date];
+  if (options.scoreVersion === undefined) {
+    conditions.push(
+      `sc.score_version = (SELECT MAX(score_version) FROM scores_daily WHERE date = ?1)`,
+    );
+  } else {
+    binds.push(options.scoreVersion);
+    conditions.push(`sc.score_version = ?${binds.length}`);
+  }
   if (options.verdict !== undefined) {
     binds.push(options.verdict);
     conditions.push(`sc.verdict = ?${binds.length}`);
@@ -396,7 +434,7 @@ async function selectRankingForSymbol(
        LEFT JOIN signals_daily g ON g.symbol_id = sc.symbol_id AND g.date = sc.date
             AND g.signal_code = 'golden_cross'
        WHERE sc.symbol_id = ?1 AND sc.date <= ?2
-       ORDER BY sc.date DESC LIMIT 1`,
+       ORDER BY sc.date DESC, sc.score_version DESC LIMIT 1`,
     )
     .bind(symbolId, date)
     .first<RankingRowDb>();

@@ -15,7 +15,8 @@
     "dev": "npm run dev -w @invest/worker",
     "deploy": "npm run deploy -w @invest/worker",
     "check:datasource": "npm run check:datasource -w @invest/batch",
-    "backfill": "npm run backfill -w @invest/batch"
+    "backfill": "npm run backfill -w @invest/batch",
+    "preflight": "node scripts/preflight.mjs"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^5.20260825.1",

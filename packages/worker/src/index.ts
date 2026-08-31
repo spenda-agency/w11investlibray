@@ -5,6 +5,8 @@ import { handleLpRequest } from './routes/lp.js';
 import { handleHealth, handleRanking, handleRunPipeline, handleSymbol, json } from './routes/api.js';
 import { handleDashboard, handleScreener, handleSymbolPage } from './routes/ui.js';
 import { runDailyPipeline } from './jobs/dailyPipeline.js';
+import { handleWaitlistCsv, handleWaitlistPage } from './routes/waitlistAdmin.js';
+import { withSecurityHeaders } from './headers.js';
 
 /**
  * エントリポイント。
@@ -18,87 +20,9 @@ import { runDailyPipeline } from './jobs/dailyPipeline.js';
  */
 export default {
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
-    const url = new URL(request.url);
-    const { site, path, redirectTo } = resolveSite(url, env);
-
-    // www → apex。恒久的な移動として 301 で返す。
-    if (redirectTo !== undefined) {
-      return Response.redirect(redirectTo, 301);
-    }
-
-    // 想定外のホスト。**アプリを返さない**（Access を通らずに開かれるため）。
-    if (site === 'unknown') {
-      return json({ error: '見つからない' }, 404);
-    }
-
-    // LP 側。認証は通さず、市場データにも触れない。
-    if (site === 'lp') {
-      try {
-        return await handleLpRequest(request, env, path);
-      } catch (err) {
-        console.error('lp', err);
-        return json({ error: '内部エラー' }, 500);
-      }
-    }
-
-    // 監視用。ここだけ認証不要。内部の数字は返さない。
-    if (path === '/api/health') return handleHealth(env);
-
-    // アプリ側は Access の後ろなのでクローラーは到達しないが、
-    // 設定が外れたときに索引されないよう全面拒否を返しておく。
-    if (path === '/robots.txt') {
-      return new Response('User-agent: *\nDisallow: /\n', {
-        headers: { 'content-type': 'text/plain; charset=utf-8' },
-      });
-    }
-
-    const auth = await authenticate(request, env);
-    if (!auth.ok) {
-      return json({ error: '認証が必要', reason: auth.reason }, 401);
-    }
-
-    try {
-      if (path === '/') return await handleDashboard(env);
-      if (path === '/screener') return await handleScreener(env, url);
-
-      const symbolPageMatch = /^\/symbol\/(.+)$/.exec(path);
-      if (symbolPageMatch?.[1] !== undefined) {
-        return await handleSymbolPage(env, decodeURIComponent(symbolPageMatch[1]));
-      }
-
-      if (path === '/api/ranking') return await handleRanking(env, url);
-
-      const symbolApiMatch = /^\/api\/symbol\/(.+)$/.exec(path);
-      if (symbolApiMatch?.[1] !== undefined) {
-        return await handleSymbol(env, url, decodeURIComponent(symbolApiMatch[1]));
-      }
-
-      if (path === '/api/run-pipeline') {
-        if (request.method !== 'POST') {
-          return json({ error: 'POST で呼ぶこと' }, 405);
-        }
-        return await handleRunPipeline(env, url);
-      }
-
-      // 会員機能は Phase 7。**規約の確認が済むまで開けない。**
-      if (path.startsWith('/member')) {
-        return json(
-          {
-            error: isMemberSignupEnabled(env)
-              ? '会員機能は Phase 7 で実装する'
-              : '会員機能は現在無効。docs/DATA-SOURCES.md の再配信条件を確認するまで開けない',
-          },
-          isMemberSignupEnabled(env) ? 501 : 403,
-        );
-      }
-
-      return json({ error: `見つからない: ${path}` }, 404);
-    } catch (err) {
-      // 例外の中身をそのまま返さない（内部構造やキーが漏れうる）。
-      console.error('unhandled', err);
-      ctx.waitUntil(Promise.resolve());
-      return json({ error: '内部エラー' }, 500);
-    }
+    // **保安ヘッダーは出口 1 箇所で被せる。**
+    // 個々のルートで付けて回ると、ルートを 1 本足したときに付け忘れる。
+    return withSecurityHeaders(await route(request, env, ctx));
   },
 
   /**
@@ -123,3 +47,97 @@ export default {
     );
   },
 } satisfies ExportedHandler<Env>;
+
+/** ルーティング本体。応答は `fetch` が保安ヘッダーで包んで返す。 */
+async function route(
+  request: Request,
+  env: Env,
+  ctx: ExecutionContext,
+): Promise<Response> {
+  const url = new URL(request.url);
+  const { site, path, redirectTo } = resolveSite(url, env);
+
+  // www → apex。恒久的な移動として 301 で返す。
+  if (redirectTo !== undefined) {
+    return Response.redirect(redirectTo, 301);
+  }
+
+  // 想定外のホスト。**アプリを返さない**（Access を通らずに開かれるため）。
+  if (site === 'unknown') {
+    return json({ error: '見つからない' }, 404);
+  }
+
+  // LP 側。認証は通さず、市場データにも触れない。
+  if (site === 'lp') {
+    try {
+      return await handleLpRequest(request, env, path);
+    } catch (err) {
+      console.error('lp', err);
+      return json({ error: '内部エラー' }, 500);
+    }
+  }
+
+  // 監視用。ここだけ認証不要。内部の数字は返さない。
+  if (path === '/api/health') return handleHealth(env);
+
+  // アプリ側は Access の後ろなのでクローラーは到達しないが、
+  // 設定が外れたときに索引されないよう全面拒否を返しておく。
+  if (path === '/robots.txt') {
+    return new Response('User-agent: *\nDisallow: /\n', {
+      headers: { 'content-type': 'text/plain; charset=utf-8' },
+    });
+  }
+
+  const auth = await authenticate(request, env);
+  if (!auth.ok) {
+    return json({ error: '認証が必要', reason: auth.reason }, 401);
+  }
+
+  try {
+    if (path === '/') return await handleDashboard(env);
+    if (path === '/screener') return await handleScreener(env, url);
+
+    const symbolPageMatch = /^\/symbol\/(.+)$/.exec(path);
+    if (symbolPageMatch?.[1] !== undefined) {
+      return await handleSymbolPage(env, decodeURIComponent(symbolPageMatch[1]));
+    }
+
+    if (path === '/api/ranking') return await handleRanking(env, url);
+
+    // 集めた先行登録。**アプリ側（Access の後ろ）にだけ置く。**
+    // メールアドレスは個人情報なので、LP 側から到達させない。
+    if (path === '/waitlist') return await handleWaitlistPage(env);
+    if (path === '/api/waitlist.csv') return await handleWaitlistCsv(env, url);
+
+    const symbolApiMatch = /^\/api\/symbol\/(.+)$/.exec(path);
+    if (symbolApiMatch?.[1] !== undefined) {
+      return await handleSymbol(env, url, decodeURIComponent(symbolApiMatch[1]));
+    }
+
+    if (path === '/api/run-pipeline') {
+      if (request.method !== 'POST') {
+        return json({ error: 'POST で呼ぶこと' }, 405);
+      }
+      return await handleRunPipeline(env, url);
+    }
+
+    // 会員機能は Phase 7。**規約の確認が済むまで開けない。**
+    if (path.startsWith('/member')) {
+      return json(
+        {
+          error: isMemberSignupEnabled(env)
+            ? '会員機能は Phase 7 で実装する'
+            : '会員機能は現在無効。docs/DATA-SOURCES.md の再配信条件を確認するまで開けない',
+        },
+        isMemberSignupEnabled(env) ? 501 : 403,
+      );
+    }
+
+    return json({ error: `見つからない: ${path}` }, 404);
+  } catch (err) {
+    // 例外の中身をそのまま返さない（内部構造やキーが漏れうる）。
+    console.error('unhandled', err);
+    ctx.waitUntil(Promise.resolve());
+    return json({ error: '内部エラー' }, 500);
+  }
+}

@@ -25,3 +25,5 @@ export { resolveSite, normalisePath, lpBasePath, appUrl } from '../src/site.js';
 export { normaliseEmail } from '../src/routes/waitlist.js';
 export { lpPage } from '../src/ui/lp.js';
 export { TOKENS, FONT_STACK } from '../src/ui/tokens.js';
+export { CSP, SECURITY_HEADERS, withSecurityHeaders } from '../src/headers.js';
+export { csvCell } from '../src/routes/waitlistAdmin.js';

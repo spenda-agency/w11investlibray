@@ -69,7 +69,15 @@ npx wrangler secret put JQUANTS_API_KEY
 ## 5. デプロイする
 
 ```bash
-npm run deploy          # = wrangler deploy --env production
+npm run deploy          # preflight → wrangler deploy --env production
+```
+
+`npm run deploy` は先に `scripts/preflight.mjs` を走らせる。
+`database_id` がプレースホルダのままなど、**デプロイ前に気づける失敗**を
+分かりやすいメッセージで止める。単体でも走らせられる。
+
+```bash
+npm run preflight
 ```
 
 `wrangler.toml` は 2 段構成になっている。
@@ -215,6 +223,32 @@ curl -X POST "https://your-worker.workers.dev/api/run-pipeline"
 
 `/api/health` だけは認証を通さない（監視から叩くため）。
 内部の数字は返さず、最後に成功した日付と遅れ日数だけを返す。
+
+---
+
+---
+
+## 集めた先行登録を見る
+
+`https://app.goldencross-incomegains.com/waitlist`（Access の後ろ）。
+件数と一覧が出て、`/api/waitlist.csv` で書き出せる。
+
+**メールアドレスは個人情報。** 公開側（LP のホスト）には口を開けていない。
+書き出したファイルの取り扱いに注意すること。
+
+CSV は Excel で開ける形（UTF-8 BOM 付き）にしてあり、
+`=` で始まる値には `'` を前置している（表計算ソフトが数式として
+実行するのを防ぐため）。
+
+---
+
+## 保安ヘッダー
+
+`src/headers.ts` が全レスポンスに CSP・`nosniff`・`Referrer-Policy`・
+`X-Frame-Options`・HSTS を付けている。Cloudflare 側で重ねて設定する必要はない。
+
+**`script-src 'none'`** にしてある。この画面に JavaScript が 1 行も無いため。
+`npm test` がこれを固定しているので、スクリプトを足すとテストが落ちる。
 
 ---
 

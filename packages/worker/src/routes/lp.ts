@@ -2,6 +2,7 @@ import type { Env } from '../types.js';
 import { lpPage } from '../ui/lp.js';
 import { appUrl, lpBasePath, lpUrl } from '../site.js';
 import { handleWaitlist } from './waitlist.js';
+import { handleHealth } from './api.js';
 import { escapeHtml } from '../ui/format.js';
 
 /**
@@ -29,6 +30,10 @@ export async function handleLpRequest(
       }),
     );
   }
+
+  // 監視用。公開ホストを監視対象にすることが多いので、こちらにも出す。
+  // 中身はアプリ側と同じで、内部の数字は返さない。
+  if (path === '/api/health') return handleHealth(env);
 
   // 検索エンジン向け。**LP だけを拾わせる。**
   // ダッシュボード側は別ホストで、そちらの robots.txt は全面拒否にしてある。

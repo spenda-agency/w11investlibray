@@ -6,14 +6,15 @@
   "type": "module",
   "scripts": {
     "dev": "wrangler dev",
-    "deploy": "wrangler deploy --env production",
+    "deploy": "node ../../scripts/preflight.mjs && wrangler deploy --env production",
     "typecheck": "tsc --noEmit",
     "build:test": "esbuild test/entry.ts --bundle --format=esm --platform=neutral --outfile=.build/worker.mjs",
     "test": "npm run build:test && node --test test/*.test.mjs",
     "db:migrate:local": "wrangler d1 execute invest-db --local --file=../../migrations/0001_init.sql && wrangler d1 execute invest-db --local --file=../../migrations/0002_waitlist.sql",
     "db:migrate:remote": "wrangler d1 execute invest-db --remote --env production --file=../../migrations/0001_init.sql && wrangler d1 execute invest-db --remote --env production --file=../../migrations/0002_waitlist.sql",
     "db:seed:local": "wrangler d1 execute invest-db --local --file=./seed/sample.sql",
-    "deploy:dry": "wrangler deploy --env production --dry-run"
+    "deploy:dry": "wrangler deploy --env production --dry-run",
+    "preflight": "node ../../scripts/preflight.mjs"
   },
   "dependencies": {
     "@invest/core": "*"

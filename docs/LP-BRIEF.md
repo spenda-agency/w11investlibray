@@ -89,8 +89,23 @@ JavaScript 無しで動く（フォーム送信でページが返る）ので、
 | 明暗 | `prefers-color-scheme` の両方に対応する。片方だけ作らない |
 | 本文幅 | `--maxw`（現在 720px） |
 | タップ領域 | **最小 44px**。現在の入力欄とボタンは 48px |
-| 書体 | `FONT_STACK`（和文が読める順）。Web フォントを足すなら読み込み方法ごと決める |
+| 書体 | `FONT_STACK`（和文が読める順）。**Web フォントを足すなら CSP も直す**（下記） |
 | 画像 | 現在ゼロ。足すなら Worker のバンドルに載るサイズか、R2 配信かを決める |
+
+---
+
+## CSP（コンテンツセキュリティポリシー）の制約
+
+`src/headers.ts` が全ページに CSP を掛けている。デザイン上、次の 2 つが効く。
+
+- **JavaScript は使えない。** `script-src 'none'`。フォームは JS 無しで動く。
+  スクリプトが要る演出を入れるなら、まず `headers.ts` と
+  `test/headers.test.mjs` を直す必要がある（意図的に固い作りにしてある）
+- **Google Fonts を足すなら CSP に追記が要る。**
+  `style-src` に `https://fonts.googleapis.com`、
+  `font-src` に `https://fonts.gstatic.com`。忘れると**フォントが黙って落ちる**
+
+インラインの `<style>` と `<svg>` 要素、`data:` の画像は許可済み。
 
 ---
 

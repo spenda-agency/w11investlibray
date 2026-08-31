@@ -552,3 +552,50 @@ function chunkIds(ids: readonly string[], size: number): string[][] {
   for (let i = 0; i < ids.length; i += size) out.push(ids.slice(i, i + size));
   return out;
 }
+
+export interface WaitlistRow {
+  readonly email: string;
+  readonly createdAt: string;
+  readonly consentedAt: string;
+  readonly source: string | null;
+  readonly status: string;
+}
+
+/**
+ * 先行登録の一覧。新しい順。
+ *
+ * **個人情報を返す。** 呼び出せるのはアプリ側（Cloudflare Access の後ろ）だけ。
+ * LP 側から到達する経路を作らないこと（`test/waitlist-admin.test.mjs` が検査）。
+ */
+export async function selectWaitlist(db: D1Database, limit: number): Promise<WaitlistRow[]> {
+  const res = await db
+    .prepare(
+      `SELECT email, created_at, consented_at, source, status
+       FROM waitlist ORDER BY created_at DESC LIMIT ?1`,
+    )
+    .bind(limit)
+    .all<{
+      email: string;
+      created_at: string;
+      consented_at: string;
+      source: string | null;
+      status: string;
+    }>();
+  return (res.results ?? []).map((r) => ({
+    email: r.email,
+    createdAt: r.created_at,
+    consentedAt: r.consented_at,
+    source: r.source,
+    status: r.status,
+  }));
+}
+
+/** 状態ごとの件数。画面の見出しに出す。 */
+export async function countWaitlist(db: D1Database): Promise<Record<string, number>> {
+  const res = await db
+    .prepare(`SELECT status, COUNT(*) AS n FROM waitlist GROUP BY status`)
+    .all<{ status: string; n: number }>();
+  const out: Record<string, number> = {};
+  for (const r of res.results ?? []) out[r.status] = r.n;
+  return out;
+}

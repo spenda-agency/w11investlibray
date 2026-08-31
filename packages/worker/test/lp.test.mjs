@@ -421,3 +421,11 @@ test('プライバシーポリシーの title も短縮名で組む', async () =
   assert.equal(title, 'プライバシーポリシー — ゴールデンクロス');
   assert.ok(title.length <= 32, `title が ${title.length} 文字ある`);
 });
+
+test('/api/health は LP 側でも応答する（公開ホストを監視するため）', async () => {
+  const env = makeEnv(HOSTS);
+  const res = await handler.fetch(req('https://invest.example/api/health'), env, ctx);
+  assert.notEqual(res.status, 404);
+  const body = await res.json();
+  assert.deepEqual(Object.keys(body).sort(), ['lagDays', 'lastSuccessDate', 'status', 'today']);
+});

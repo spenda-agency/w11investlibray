@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { readFileSync, readdirSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { join } from 'node:path';
-import { TOKENS, FONT_STACK, layout, lpPage } from '../.build/worker.mjs';
+import { TOKENS, BRAND, FONT_STACK, LP_FONT_STACK, layout, lpPage } from '../.build/worker.mjs';
 
 const UI_DIR = fileURLToPath(new URL('../src/ui', import.meta.url));
 
@@ -59,4 +59,53 @@ test('パレットは 1 ページにつき 1 回だけ出る', () => {
   const count = (lp.match(/--accent:\s*#/g) ?? []).length;
   // ライト 1 回 + ダーク 1 回
   assert.equal(count, 2, `--accent の定義が ${count} 回出ている`);
+});
+
+// ---- LP のブランド色 --------------------------------------------------------
+
+/** googletool-orange-basic の色。tokens.ts の BRAND だけが定義する。 */
+const BRAND_TOKENS = [
+  '--brand-accent', '--brand-accent-deep', '--brand-primary', '--brand-dark',
+  '--brand-blue', '--brand-green', '--brand-ground', '--brand-surface',
+  '--brand-text', '--brand-text-light',
+];
+
+test('ブランド色も tokens.ts だけが定義する', () => {
+  const others = readdirSync(UI_DIR).filter((f) => f.endsWith('.ts') && f !== 'tokens.ts');
+  for (const name of others) {
+    const source = readFileSync(join(UI_DIR, name), 'utf8');
+    for (const token of BRAND_TOKENS) {
+      const defines = new RegExp(`${token}\\s*:\\s*[^;\\n)]`).test(source);
+      assert.ok(!defines, `${name} が ${token} を定義している。tokens.ts に寄せること`);
+    }
+  }
+  for (const token of BRAND_TOKENS) {
+    assert.ok(BRAND.includes(`${token}:`), `${token} が BRAND に無い`);
+  }
+});
+
+test('ブランド色は明暗で変わらない', () => {
+  // LP はどの環境でも同じ色で出す（白いカードの影と、白で塗った波が
+  // 明るい地を前提にしている）。ここに暗色の上書きを足すと落ちる。
+  assert.ok(!BRAND.includes('prefers-color-scheme'), 'BRAND に暗色の上書きがある');
+  // `light dark` に変えられても落ちるよう、終端まで見る
+  assert.match(BRAND, /color-scheme:\s*light\s*;/);
+});
+
+test('ブランド色を出すのは LP だけ（ダッシュボードは出さない）', () => {
+  const lp = lpPage({ siteName: 's', shortName: 's', basePath: '', appUrl: '/' });
+  const app = layout({ title: 't', siteName: 's', body: '<p>x</p>' });
+  assert.ok(lp.includes('--brand-accent:'), 'LP に BRAND が入っていない');
+  assert.ok(!app.includes('--brand-accent:'), 'ダッシュボードに BRAND が入っている');
+});
+
+test('LP の書体は Noto Sans JP が先頭', () => {
+  // Web フォントを読んでも、system-ui が先頭だとそちらが勝って効かない。
+  assert.ok(LP_FONT_STACK.startsWith('"Noto Sans JP"'), LP_FONT_STACK);
+  assert.ok(LP_FONT_STACK.includes(FONT_STACK), '読み込みに失敗したときの受け皿が要る');
+
+  const lp = lpPage({ siteName: 's', shortName: 's', basePath: '', appUrl: '/' });
+  assert.ok(lp.includes(LP_FONT_STACK));
+  // 書体を読み込む <link> と、それを許す CSP は対で要る（headers.test.mjs が CSP 側）
+  assert.match(lp, /fonts\.googleapis\.com\/css2\?family=Noto\+Sans\+JP/);
 });

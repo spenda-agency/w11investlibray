@@ -5,21 +5,48 @@
  * 配色を変えたときに片方だけ取り残される。**LP とアプリで色がずれる**のが
  * いちばん見苦しい壊れ方なので、パレットは 1 箇所に寄せてある。
  *
- * デザインテンプレートを当てるときに触るのはこのファイル。
- * 各ページ固有の値（LP の `--maxw` など）だけ、それぞれの側に置く。
+ * 出しているものは 2 つある。
+ *
+ *   `TOKENS` — 役割で名前を付けた共有パレット。明暗の両方を持つ。
+ *              LP もダッシュボードも先頭に入れる。
+ *   `BRAND`  — LP のブランド色。**明暗で変わらない。** LP だけが入れる。
+ *
+ * **なぜ 2 つに分かれているか。** ダッシュボードは長時間見る道具なので
+ * ダークモードが要る。LP は名刺なので、どの環境でも同じ色で出したい
+ * （白いカードに落とす影と、ヒーロー下の波（白で塗った SVG）は
+ * 明るい地を前提にしている）。LP 側は `color-scheme: light` を宣言して
+ * `--brand-*` だけを使う。
+ *
+ * 色の出どころは `spenda-agency/landing-page` の `googletool-orange-basic`。
  *
  * `test/tokens.test.mjs` が、他のファイルでパレットを再定義していないことを
  * 検査している。
  */
 
-/** 本文の書体。和文が読める順に並べる。 */
+/**
+ * 本文の書体。和文が読める順に並べる。
+ * ダッシュボードはここまで（外部への通信を増やさない）。
+ */
 export const FONT_STACK =
   'system-ui, -apple-system, "Hiragino Kaku Gothic ProN", "Noto Sans JP", sans-serif';
 
 /**
+ * LP の書体。**Noto Sans JP を先頭に置く。**
+ *
+ * `FONT_STACK` は system-ui が先頭なので、Web フォントを読み込んでも
+ * そちらが勝って効かない。LP はデザイン指定が Noto Sans JP なので
+ * 先頭に足したものを使う（後ろは `FONT_STACK` そのまま＝読み込みに
+ * 失敗しても和文が出る）。
+ *
+ * 読み込み元は Google Fonts。**訪問者の IP が Google に渡る**ので、
+ * プライバシーポリシーの「外部サービス」に書いてある。
+ */
+export const LP_FONT_STACK = `"Noto Sans JP", ${FONT_STACK}`;
+
+/**
  * すべてのページの先頭に入れる。パレット、ダークの上書き、最小限のリセット。
  *
- * 色は「役割」で名前を付けてある（`--accent` であって `--green` ではない）。
+ * 色は「役割」で名前を付けてある（`--accent` であって `--orange` ではない）。
  * テンプレートの色に差し替えても、使う側のコードを直さずに済む。
  */
 export const TOKENS = `
@@ -31,13 +58,13 @@ export const TOKENS = `
   --muted: #6b6a67;
   --line: #e5e3df;
 
-  /* 役割色 */
-  --accent: #2f6f4f;
+  /* 役割色。--accent はブランドのオレンジ */
+  --accent: #ff7d27;
   --danger: #a4402f;
   --warn: #8a6d1f;
 
-  /* 相場の上下。--accent / --danger と同値だが、意味が違うので分けてある
-     （テンプレート次第で赤緑を入れ替えることがある） */
+  /* 相場の上下。**--accent とは別に持つ。**
+     上げ下げは意味が決まっているので、ブランド色に引きずらせない */
   --up: #2f6f4f;
   --down: #a4402f;
 
@@ -51,7 +78,8 @@ export const TOKENS = `
     --muted: #9b9a96;
     --line: #32323a;
 
-    --accent: #6dbd92;
+    /* 暗い地の上ではオレンジを少し明るくしないと沈む */
+    --accent: #ff9350;
     --danger: #e08272;
     --warn: #d9b45c;
 
@@ -60,4 +88,33 @@ export const TOKENS = `
   }
 }
 * { box-sizing: border-box; }
+`;
+
+/**
+ * LP のブランド色。**`prefers-color-scheme` で変えない。**
+ *
+ * LP は `color-scheme: light` を宣言して、この 8 色だけで組む。
+ * ここに暗色の上書きを足さないこと（白いカードの影と
+ * ヒーロー下の波が明るい地を前提にしている）。
+ */
+export const BRAND = `
+:root {
+  color-scheme: light;
+
+  --brand-accent: #ff7d27;        /* ビビッドオレンジ。CTA と強調 */
+  --brand-accent-deep: #ff5c00;   /* グラデーションの終端とホバー */
+  --brand-primary: #2c3e50;       /* ダークブルー。見出しとフッター */
+  --brand-dark: #1a252f;          /* グラデーションの終端 */
+  --brand-blue: #3498db;          /* 補助色1。手順の番号 */
+  --brand-green: #27ae60;         /* 補助色2 */
+  --brand-ground: #f5f7fa;        /* 節の地（bg-light） */
+  --brand-surface: #ffffff;       /* カードの地 */
+  --brand-text: #333333;
+  --brand-text-light: #7f8c8d;
+
+  /* 影。カードの浮きは 3 段階しか使わない */
+  --brand-shadow-1: 0 2px 6px rgba(0, 0, 0, .06);
+  --brand-shadow-2: 0 4px 16px rgba(34, 49, 108, .08);
+  --brand-shadow-3: 0 8px 30px rgba(0, 0, 0, .06);
+}
 `;

@@ -4,6 +4,7 @@ import { appUrl, lpBasePath, lpUrl } from '../site.js';
 import { handleWaitlist } from './waitlist.js';
 import { handleHealth } from './api.js';
 import { escapeHtml } from '../ui/format.js';
+import { LP_CSP } from '../headers.js';
 
 /**
  * LP 側のルーティング。**認証を通さない。**
@@ -112,12 +113,20 @@ function text(body: string, status = 200): Response {
   });
 }
 
+/**
+ * LP 側の HTML。**CSP をここで自分で入れる。**
+ *
+ * `withSecurityHeaders` は既にある値を上書きしないので、ここで入れた
+ * `LP_CSP` がそのまま残る（既定の `CSP` には Google Fonts の 2 ホストが
+ * 入っていないので、書体が読めなくなる）。
+ */
 function html(body: string, status = 200): Response {
   return new Response(body, {
     status,
     headers: {
       'content-type': 'text/html; charset=utf-8',
       'cache-control': status === 200 ? 'public, max-age=300' : 'no-store',
+      'content-security-policy': LP_CSP,
     },
   });
 }
@@ -140,8 +149,8 @@ body { margin:0 auto; padding:2.5rem 1.5rem 4rem; max-width:720px; line-height:1
   background:#fbfaf9; color:#1a1a19; }
 @media (prefers-color-scheme: dark) { body { background:#16161a; color:#eceae6; } }
 h1 { font-size:1.5rem; } h2 { font-size:1.0625rem; margin-top:2rem; }
-.todo { color:#a4402f; font-weight:600; }
-a { color:#2f6f4f; }
+.todo { color:#c0392b; font-weight:600; }
+a { color:#ff7d27; }
 </style>
 </head>
 <body>
@@ -156,6 +165,14 @@ a { color:#2f6f4f; }
 
 <h2>第三者提供</h2>
 <p>ご本人の同意なく第三者へ提供することはありません。</p>
+
+<h2>外部サービス</h2>
+<p>本サイトは、表示に用いる書体（Noto Sans JP）を Google Fonts
+（<a href="https://fonts.googleapis.com/">fonts.googleapis.com</a> および
+fonts.gstatic.com）から読み込んでいます。この読み込みに伴い、
+<strong>お使いの端末の IP アドレスと User-Agent が Google に送信されます。</strong>
+当方はこれを取得・保存しません。取り扱いについては Google のプライバシーポリシーに従います。
+アクセス解析ツールおよび広告配信タグは設置していません。</p>
 
 <h2>保存期間</h2>
 <p><span class="todo">[保存期間を記入]</span></p>

@@ -61,11 +61,17 @@ npm run dev                                 # http://localhost:8787/
 
 ---
 
-## Claude Design で画面を作る場合
+## 画面をデザインする場合
 
-`/design` はデザインキャンバス（複数アートボードを 1 枚のキャンバスに並べ、
-公開後にブラウザ上で直接いじれる Artifact）を作る機能。**画面のデザインには使えるが、
-ドメインや DNS の設定はしない。** 「ドメイン配下の構成」が何を指すかで分かれる。
+デザインの出どころは **`spenda-agency/landing-page` の `googletool-orange-basic`**。
+LP はこの骨格をそのまま写してある（配色・余白・カードの影・節の順番）。
+色は `packages/worker/src/ui/tokens.ts` の `BRAND` に写し取ってあるので、
+別リポジトリを見に行かなくても値は分かる。
+
+> 元リポジトリの README は `googletool-orange-basic` を「旧」、
+> `googletool`（紺×金）を最新としている。**紺×金に寄せる判断もありうる**
+> （金融サービスとしては相性が良い）。その場合に差し替えるのは
+> `tokens.ts` の `BRAND` と `lp.ts` の `STYLES` だけで済む。
 
 ### A. 画面の構成・遷移・見た目を設計したい場合 → できる
 
@@ -89,9 +95,9 @@ npm run dev                                 # http://localhost:8787/
 `packages/worker/src/index.ts` のルーティングと `wrangler.toml` の `[[routes]]` に集約してある。
 現在の全パスは `README.md` と `DEPLOY.md` から読み取れる。
 
-### C. Cloudflare 側のドメイン・DNS・ルートを設定したい場合 → できない
+### C. Cloudflare 側のドメイン・DNS・ルートを設定したい場合 → コードの外
 
-これは Claude Design ではなく `wrangler.toml` と Cloudflare ダッシュボードの作業。
+これは `wrangler.toml` と Cloudflare ダッシュボードの作業。
 手順は `DEPLOY.md` の 3 と 5 と 9。**差し替えるのは `wrangler.toml` の
 `workers_dev`・`[[routes]]`・`LP_HOSTNAME` / `APP_HOSTNAME` だけ**で済むようにしてある。
 
@@ -105,11 +111,20 @@ npm run dev                                 # http://localhost:8787/
 
 | ファイル | |
 |---|---|
-| `src/ui/tokens.ts` | 配色。**ここ 1 つで LP とダッシュボードの両方に反映される** |
+| `src/ui/tokens.ts` | 配色。`BRAND` が LP 用、`TOKENS` が LP とダッシュボードの共有 |
 | `src/ui/lp.ts` の `STYLES` と各節 | LP のレイアウトとマークアップ。**本文はそのまま流用できる** |
 
 `tokens.ts` 以外でパレットを再定義すると `npm test` が落ちる。
 LP とダッシュボードで色がずれるのを防ぐため。
+
+**LP に JavaScript を足さないこと。** CSP を `script-src 'none'` で固定してある
+（`src/headers.ts`）。ヘッダーの背景切替・FAQ の開閉・フェードインは
+すべて CSS とブラウザの機能で組んである。詳細は `LP-BRIEF.md` の
+「JavaScript 無しでテンプレートの挙動を再現している箇所」。
+
+**外部への通信は Google Fonts の 2 ホストだけ。** 解析タグや外部の画像を
+足すとテストが落ちる（`test/lp.test.mjs`）。増やすなら `headers.ts` の
+`LP_CSP` と `/privacy` の「外部サービス」を一緒に直すこと。
 
 ### 引き継ぎ先に渡すとよいもの
 

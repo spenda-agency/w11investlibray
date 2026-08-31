@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { readFileSync, readdirSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { join } from 'node:path';
-import { handler, CSP, SECURITY_HEADERS, withSecurityHeaders } from '../.build/worker.mjs';
+import { handler, CSP, LP_CSP, SECURITY_HEADERS, withSecurityHeaders } from '../.build/worker.mjs';
 import { makeEnv } from './helpers/d1.mjs';
 
 const ctx = { waitUntil() {}, passThroughOnException() {} };
@@ -91,4 +91,42 @@ test('content-type を壊さない', async () => {
     const res = await handler.fetch(req(url), env, ctx);
     assert.match(res.headers.get('content-type'), expected, url);
   }
+});
+
+// ---- LP だけ Web フォントのために開けてある -------------------------------
+
+test('LP の CSP は、既定との差が Google Fonts の 2 ホストだけ', () => {
+  // 書体（Noto Sans JP）を読むために開けた穴が、いつのまにか広がっていないこと。
+  const diff = (a, b) => a.split('; ').filter((d) => !b.includes(d));
+  assert.deepEqual(diff(LP_CSP, CSP.split('; ')), [
+    "style-src 'unsafe-inline' https://fonts.googleapis.com",
+    'font-src https://fonts.gstatic.com',
+  ]);
+  // 緩めたのは style と font だけ。スクリプトは LP でも禁止のまま。
+  assert.match(LP_CSP, /script-src 'none'/);
+  assert.match(LP_CSP, /default-src 'none'/);
+  assert.match(LP_CSP, /form-action 'self'/);
+});
+
+test('外部ホストを許しているのは Google Fonts の 2 つだけ', () => {
+  const hosts = [...LP_CSP.matchAll(/https:\/\/[^\s;]+/g)].map((m) => m[0]);
+  assert.deepEqual(hosts.sort(), ['https://fonts.googleapis.com', 'https://fonts.gstatic.com']);
+});
+
+test('ダッシュボード側には外部ホストを 1 つも足さない', () => {
+  // アプリは Access の内側。外へ出る通信を持たせない。
+  assert.ok(!/https?:\/\//.test(CSP), `既定の CSP に外部ホストがある: ${CSP}`);
+});
+
+test('LP の応答には LP_CSP、アプリの応答には既定の CSP が付く', async () => {
+  const env = makeEnv(HOSTS);
+  const lp = await handler.fetch(req('https://invest.example/'), env, ctx);
+  assert.equal(lp.headers.get('content-security-policy'), LP_CSP);
+
+  const privacy = await handler.fetch(req('https://invest.example/privacy'), env, ctx);
+  assert.equal(privacy.headers.get('content-security-policy'), LP_CSP);
+
+  const app = await handler.fetch(req('http://localhost:8787/'), makeEnv(), ctx);
+  assert.equal(app.headers.get('content-security-policy'), CSP);
+  assert.ok(!app.headers.get('content-security-policy').includes('fonts.googleapis.com'));
 });

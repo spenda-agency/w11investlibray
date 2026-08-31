@@ -19,8 +19,7 @@
  * ので、リクエストごとに変わる nonce とは噛み合わない。
  * スクリプトが無くインラインスタイルだけなら実害は小さい。
  *
- * Google Fonts を足すときは `style-src` に `https://fonts.googleapis.com`、
- * `font-src` に `https://fonts.gstatic.com` の追加が要る。
+ * LP だけは Web フォント（Noto Sans JP）を読むので `LP_CSP` を使う。
  */
 export const CSP = [
   "default-src 'none'",
@@ -30,6 +29,31 @@ export const CSP = [
   // フォームの送信先を自分自身に限る。差し替えられても外へ飛ばない。
   "form-action 'self'",
   // クリックジャッキング対策。iframe に入れさせない。
+  "frame-ancestors 'none'",
+  "base-uri 'none'",
+].join('; ');
+
+/**
+ * LP だけに被せる CSP。**`CSP` との差は Google Fonts の 2 ホストだけ。**
+ *
+ * デザイン指定の書体（Noto Sans JP）を読むために、
+ * `style-src` に `https://fonts.googleapis.com`（@font-face を書いた CSS）、
+ * `font-src` に `https://fonts.gstatic.com`（フォント本体）を足してある。
+ *
+ * **ダッシュボード側には足さない。** あちらは Access の内側で、
+ * 外部への通信を 1 本も持たせたくない。`script-src 'none'` は LP でも同じ。
+ *
+ * この 2 ホストを開けた分、訪問者の IP が Google に渡る。
+ * `/privacy` の「外部サービス」にそう書いてある。
+ * 書体をやめるなら、この定数と `ui/lp.ts` の `<link>` を一緒に消すこと。
+ */
+export const LP_CSP = [
+  "default-src 'none'",
+  "script-src 'none'",
+  "style-src 'unsafe-inline' https://fonts.googleapis.com",
+  "font-src https://fonts.gstatic.com",
+  "img-src 'self' data:",
+  "form-action 'self'",
   "frame-ancestors 'none'",
   "base-uri 'none'",
 ].join('; ');

@@ -429,3 +429,64 @@ test('/api/health は LP 側でも応答する（公開ホストを監視する�
   const body = await res.json();
   assert.deepEqual(Object.keys(body).sort(), ['lagDays', 'lastSuccessDate', 'status', 'today']);
 });
+
+// ---- デザイン骨格（googletool-orange-basic）を保つ ------------------------
+
+test('LP が外へ出るのは Google Fonts の 2 ホストだけ', async () => {
+  // **メールアドレスを集めるページ**なので、外部への通信を勝手に増やさない。
+  // 解析タグや外部の画像を足せばここが落ちる。
+  const env = makeEnv(HOSTS);
+  const html = await (await handler.fetch(req('https://invest.example/'), env, ctx)).text();
+  const allowed = new Set([
+    'fonts.googleapis.com',
+    'fonts.gstatic.com',
+    'invest.example',       // canonical / og:url
+    'app.invest.example',   // ログイン先
+  ]);
+  for (const [, url] of html.matchAll(/(?:href|src)="(https?:\/\/[^"]+)"/g)) {
+    const host = new URL(url).hostname;
+    assert.ok(allowed.has(host), `LP が ${host} を参照している`);
+  }
+});
+
+test('FAQ は JavaScript 無しで開閉する', () => {
+  // 元のテンプレートは JS でクラスを付け外ししている。CSP が script-src 'none'
+  // なので <details> に置き換えてある。<div> に戻せばここが落ちる。
+  const html = lpPage({ siteName: 'X', shortName: 'X', basePath: '', appUrl: '/' });
+  const items = (html.match(/<details class="faq-item/g) ?? []).length;
+  assert.ok(items >= 5, `FAQ が ${items} 件しか <details> になっていない`);
+  assert.equal(items, (html.match(/<summary class="faq-q"/g) ?? []).length);
+});
+
+test('LP はダークモードで色が変わらない', () => {
+  // ヒーロー下の波（白で塗った SVG）と、白いカードに落とす影は
+  // 明るい地を前提にしている。暗い地に置くと破綻する。
+  const html = lpPage({ siteName: 'X', shortName: 'X', basePath: '', appUrl: '/' });
+  assert.match(html, /color-scheme:\s*light\s*;/);
+  // 本文の色は --brand-* だけで組む（--ink などは明暗で入れ替わる）
+  assert.ok(!/color: var\(--ink\)/.test(html), 'LP が明暗で変わる色を使っている');
+});
+
+test('先行登録のフォームがページ内に 2 か所ある', () => {
+  const html = lpPage({ siteName: 'X', shortName: 'X', basePath: '', appUrl: '/' });
+  assert.equal((html.match(/<form class="signup-form"/g) ?? []).length, 2);
+  // id が衝突すると <label for> が片方にしか効かない
+  const ids = [...html.matchAll(/id="(email|consent|company)-([a-z]+)"/g)].map((m) => m[0]);
+  assert.equal(new Set(ids).size, ids.length, `id が重複している: ${ids}`);
+});
+
+test('送信に成功したらフォームを出さない', () => {
+  const html = lpPage({
+    siteName: 'X', shortName: 'X', basePath: '', appUrl: '/', submitted: 'ok',
+  });
+  assert.match(html, /登録を受け付けました/);
+  assert.ok(!html.includes('<form class="signup-form"'), '完了後にフォームが残っている');
+});
+
+test('プライバシーポリシーが Web フォントの外部送信に触れている', async () => {
+  // CSP で fonts.gstatic.com を開けた以上、書かないと辻褄が合わない。
+  const env = makeEnv(HOSTS);
+  const html = await (await handler.fetch(req('https://invest.example/privacy'), env, ctx)).text();
+  assert.match(html, /Google Fonts/);
+  assert.match(html, /IP アドレスと User-Agent が Google に送信されます/);
+});

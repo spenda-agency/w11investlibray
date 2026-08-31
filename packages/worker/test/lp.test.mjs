@@ -125,10 +125,21 @@ test('LP は銘柄名や価格を一切含まない', async () => {
   }
 });
 
-test('プライバシーポリシーは未記入箇所が分かるようになっている', async () => {
+test('プライバシーポリシーの未記入は、事業者情報の 1 箇所だけ', async () => {
+  // 保存期間と解除方法は文案を入れてある。**事業者の名称・所在地・連絡先は
+  // 本人しか書けない**ので角括弧のまま残す。埋めずに公開しないこと。
   const env = makeEnv(HOSTS);
   const html = await (await handler.fetch(req('https://invest.example/privacy'), env, ctx)).text();
-  assert.match(html, /\[運営者名・所在地・連絡先を記入\]/, '埋めるべき箇所が残っている');
+
+  assert.match(html, /\[運営者名・所在地・連絡先を記入/, '事業者欄は角括弧のまま残す');
+  // 何を書けばよいかが角括弧の中に添えてある
+  assert.match(html, /法人なら商号と本店所在地/);
+
+  // 文案を入れた 2 つが、角括弧に戻っていないこと
+  assert.ok(!html.includes('[保存期間を記入]'), '保存期間の文案が消えている');
+  assert.ok(!html.includes('[解除方法・連絡先を記入]'), '解除方法の文案が消えている');
+  assert.match(html, /速やかに削除します/);
+
   assert.match(html, /IP アドレスは保存していません/);
 });
 

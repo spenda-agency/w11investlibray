@@ -16,6 +16,7 @@
 | データソースの利用条件・未解決の論点 | [`DATA-SOURCES.md`](./DATA-SOURCES.md) |
 | Phase とブランチの対応、継ぎ目 | [`ROADMAP.md`](./ROADMAP.md) |
 | デプロイ手順とつまずいたときの切り分け | [`DEPLOY.md`](./DEPLOY.md) |
+| **公開するまでに何をやればいいか** | **[`GO-LIVE.md`](./GO-LIVE.md)** — 上から順にやれば公開できる |
 | LP をデザインするときの仕様 | [`LP-BRIEF.md`](./LP-BRIEF.md) |
 | 作業するときの規約 | [`../CLAUDE.md`](../CLAUDE.md) |
 

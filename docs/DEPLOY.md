@@ -1,5 +1,9 @@
 # デプロイ手順と、うまくいかないときの切り分け
 
+> **初めて公開するなら、まず [`GO-LIVE.md`](./GO-LIVE.md) を見ること。**
+> あちらが「上から順にやれば公開できる」一本道の手順書。
+> こちらは**辞書**——個々のコマンドの意味と、詰まったときの切り分けを引く。
+
 ---
 
 ## 0. その前に
@@ -45,12 +49,23 @@ npm run dev
 cd packages/worker
 
 npx wrangler d1 create invest-db
-# → 出力された database_id を wrangler.toml の [[d1_databases]] に貼る
-
 npx wrangler r2 bucket create invest-snapshots
-
-npm run db:migrate:remote   # 0001 と 0002 を順に適用する
 ```
+
+**出力された `database_id` を `wrangler.toml` の 2 箇所に貼る。**
+
+| 場所 | 何のためか |
+|---|---|
+| `[[d1_databases]]`（既定） | `wrangler dev` / `db:migrate:local` |
+| `[[env.production.d1_databases]]` | **本番。`preflight` が見ているのはこちらだけ** |
+
+既定側を忘れても `preflight` は止まらない。同じ id を両方に入れておくこと。
+
+```bash
+npm run db:migrate:remote -w @invest/worker   # 0001 と 0002 を順に適用する
+```
+
+このスクリプトには `--env production` が入っている（本番の D1 を指すため）。
 
 ---
 
@@ -59,10 +74,26 @@ npm run db:migrate:remote   # 0001 と 0002 を順に適用する
 **`wrangler.toml` に API キーを書かないこと。**
 
 ```bash
-npx wrangler secret put JQUANTS_API_KEY
+npx wrangler secret put JQUANTS_API_KEY --env production
 # Phase 1b で使う
-# npx wrangler secret put ANTHROPIC_API_KEY
+# npx wrangler secret put ANTHROPIC_API_KEY --env production
+
+npx wrangler secret list --env production      # 入ったか確認
 ```
+
+### **`--env production` を落とさないこと**
+
+`name = "w11-invest-library"` に `[env.production]` を足した構成なので、
+`wrangler deploy --env production` が上げる Worker の名前は
+**`w11-invest-library-production`** になる（`[env.production]` に `name` の
+上書きを置いていないため、環境名が接尾辞として付く）。
+
+**Secret は Worker ごとに分かれている。** `--env` を付けずに登録すると
+`w11-invest-library`——誰も使っていないほう——に入る。
+
+症状が分かりにくい。**デプロイは成功するのに、パイプラインだけが
+`JQUANTS_API_KEY が未設定` で落ち続ける。** `wrangler secret list --env production`
+が空なら、これ。
 
 ---
 
@@ -164,10 +195,14 @@ npm run check:datasource
 続けて Worker 側:
 
 ```bash
-BASE_URL=https://your-worker.workers.dev ./scripts/diagnose.sh
+BASE_URL=https://app.goldencross-incomegains.com ./scripts/diagnose.sh
 ```
 
 Windows では `.\scripts\diagnose.ps1`（`.sh` は PowerShell では動かない）。
+
+`workers_dev = false` なので `*.workers.dev` の URL は存在しない。
+`BASE_URL` には必ず実ドメインを入れる。**この診断は手順 9（Access）より前に**
+走らせること。
 
 ---
 
@@ -196,12 +231,16 @@ D1 の 1 日あたりの書き込み上限にも収まらない。
 ## 8. 日次パイプラインを 1 回動かす
 
 ```bash
-curl -X POST "https://your-worker.workers.dev/api/run-pipeline"
+curl -X POST "https://app.goldencross-incomegains.com/api/run-pipeline"
 ```
 
 `?force=1` で成功済みの日も走り直す。`?date=YYYY-MM-DD` で日付を指定できる。
 
 以降は Cron が平日 19:30 JST（取りこぼしは翌 07:00 JST）に自動で走る。
+
+> **この curl は手順 9（Access）より前にやること。** Access を掛けると
+> エッジで止められて叩けなくなる。Cron は影響を受けないので、
+> 1 回通しておけばあとは自動で回る。
 
 ---
 
@@ -221,10 +260,30 @@ curl -X POST "https://your-worker.workers.dev/api/run-pipeline"
    `CF_ACCESS_TEAM_DOMAIN`（`xxx.cloudflareaccess.com`）と
    `CF_ACCESS_AUD` に設定して `npm run deploy`
 
-`/api/health` だけは認証を通さない（監視から叩くため）。
-内部の数字は返さず、最後に成功した日付と遅れ日数だけを返す。
+### **Access は Worker の「手前」に立つ**
 
----
+ここを取り違えると 2 箇所でつまずく。
+
+Access はエッジで止めるので、`index.ts` の中で認証を外している経路にも
+**届く前に**割り込む。アプリケーションの Path を空にしてある
+（＝ホスト全体が対象）ので、app ホストの全パスが対象になる。
+
+| 経路 | Access を掛けるとどうなるか | どうするか |
+|---|---|---|
+| `GET /api/health`（app 側） | ログイン画面になる。監視から叩けない | **監視は LP ホストの `/api/health` を向ける。** 中身は同じで、そのために生やしてある |
+| `POST /api/run-pipeline` | curl で叩けない | **Access を掛ける前に 1 回回す**（手順 8）。それ以降は Cron に任せる |
+| **Cron（平日 19:30 / 翌 07:00）** | **影響なし** | Cron は HTTP のエッジを通らず Worker を直接起動する。設定は不要 |
+
+```bash
+# 監視に登録するのはこちら（Access の外）
+curl -s https://goldencross-incomegains.com/api/health
+```
+
+公開後にどうしても手で回したくなったら、Zero Trust → Access → Service Auth で
+サービストークンを発行し、`CF-Access-Client-Id` / `CF-Access-Client-Secret`
+ヘッダを付けて叩く。**Cron が動いているなら要らない。**
+
+`/api/health` は内部の数字を返さない。最後に成功した日付と遅れ日数だけ。
 
 ---
 
@@ -283,7 +342,8 @@ npx wrangler d1 execute invest-db --remote \
 日次パイプラインが 1 度も成功していない。
 
 ```bash
-curl "https://your-worker.workers.dev/api/health"
+# LP ホスト側。Access の外なので、掛けたあとも叩ける
+curl "https://goldencross-incomegains.com/api/health"
 ```
 
 `lastSuccessDate` が `null` なら、手順 7 と 8 をやる。

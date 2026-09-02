@@ -38,12 +38,12 @@ Cron（平日 19:30）は HTTP のエッジを通らず Worker を直接起動�
 ```
 トラック A — LP を公開する
   [ ] A1  wrangler にログインする
-  [ ] A2  D1 を作り、database_id を wrangler.toml の 2 箇所に貼る
+  [ ] A2  D1 を作り、npm run set:db-id で id を書き込む
   [ ] A3  R2 バケットを作る
   [ ] A4  マイグレーションを本番の D1 に流す
-  [ ] A5  運営者名・所在地・連絡先を書く   ← これを埋めるまで公開しない
+  [x] A5  運営者名・所在地・連絡先を書く   ← 記入済み。preflight が未記入を止める
   [ ] A6  preflight を通してデプロイする
-  [ ] A7  ドメインで開けることを確認する
+  [ ] A7  ドメインで開けることを確認する（diagnose）
   [ ] A8  WAF のレート制限を 1 本入れる
   [ ] A9  自分で先行登録して、保存されることを確認する
 
@@ -90,31 +90,31 @@ npx wrangler whoami      # アカウントが合っているか確認
 ## A2. D1 を作り、`database_id` を 2 箇所に貼る
 
 ```bash
-npx wrangler d1 create invest-db
+npx wrangler d1 create invest-db | npm run set:db-id
 ```
 
-こういう出力が返る。
+パイプで繋げば、出力から id を拾って `wrangler.toml` に書き込む。
+手でコピーしたいなら、出力をまるごと貼っても id だけ渡してもよい。
 
-```
-✅ Successfully created DB 'invest-db'
-
-[[d1_databases]]
-binding = "INVEST_DB"
-database_name = "invest-db"
-database_id = "a1b2c3d4-5e6f-7890-abcd-ef1234567890"
+```bash
+npm run set:db-id -- 'a1b2c3d4-5e6f-7890-abcd-ef1234567890'
 ```
 
-**`database_id` の値を `packages/worker/wrangler.toml` の 2 箇所に貼る。**
+```
+✓ database_id を 2 箇所に書き込んだ: a1b2c3d4-5e6f-7890-abcd-ef1234567890
+    次は npm run db:migrate:remote -w @invest/worker
+```
+
+**貼り先が 2 箇所あるのでスクリプトにしてある。**
 
 | 行 | 場所 | 何に使われるか |
 |---|---|---|
 | 31 行目付近 | `[[d1_databases]]` | `wrangler dev` / `db:migrate:local` |
 | 103 行目付近 | `[[env.production.d1_databases]]` | **本番** |
 
-どちらも `REPLACE_WITH_D1_DATABASE_ID` になっているので、同じ値で置き換える。
-
-> **`preflight` が見ているのは本番側だけ。** 既定側を忘れても止まらないが、
-> ローカルで動かすときに困る。両方入れておくこと。
+`preflight` が見ているのは本番側だけなので、**既定側の打ち間違いは黙って通る。**
+手で 2 回写す作業をなくしてある。同じ id をもう一度渡しても何も起きない（冪等）。
+UUID が 2 個以上見つかったら、**書かずに止まる**。
 
 ---
 
@@ -151,47 +151,30 @@ npx wrangler d1 execute invest-db --remote --env production \
 
 ---
 
-## A5. 運営者名・所在地・連絡先を書く ← **これを埋めるまで公開しない**
+## A5. 運営者名・所在地・連絡先 — **記入済み**
 
 LP は公開した瞬間からメールアドレスを集め始める。
 **誰が集めているのかが分からない状態で集めてはいけない。**
 
-角括弧が残っているのは **2 行だけ**。
+入っている内容:
 
-### ① プライバシーポリシー
+| 場所 | 内容 |
+|---|---|
+| `/privacy` の「事業者」 | 株式会社SPENDA（代表取締役 伊藤潤平）／ 東京都荒川区東日暮里 5-50-5 日暮里ラングウッド 3F ／ contact@spenda-c.com |
+| LP のフッター | 運営: 株式会社SPENDA ／ お問い合わせ: contact@spenda-c.com |
 
-`packages/worker/src/routes/lp.ts` の `privacyPage()` の中：
+**所在地に「東京都」を補ってある。** 登記上の表記と違っていれば
+`packages/worker/src/routes/lp.ts` の `privacyPage()` を直すこと。
 
-```
-[運営者名・所在地・連絡先を記入
- — 法人なら商号と本店所在地、個人事業なら屋号と氏名。
- 連絡先はメールアドレスで足ります]
-```
+### 空に戻したら deploy が止まる
 
-`<span class="todo">…</span>` ごと、書いた内容に置き換える。書き方の例:
-
-```html
-<p>スペンダ株式会社<br>
-東京都〇〇区〇〇 1-2-3<br>
-お問い合わせ: privacy@example.com</p>
-```
-
-### ② LP のフッター
-
-`packages/worker/src/ui/lp.ts` の `.copyright` の行：
-
-```
-運営: [運営者名を記入 — 法人なら商号、個人事業なら屋号と氏名]
- ／ お問い合わせ: [連絡先を記入 — メールアドレスで可]
-```
-
-### 埋め終わったかの確認
+`scripts/preflight.mjs` が `src/routes/lp.ts` と `src/ui/lp.ts` を読み、
+`を記入` が残っていたら**エラーで `npm run deploy` を中断する**。
+逃げ道（環境変数で無効化）は作っていない。
 
 ```bash
-grep -rn 'を記入' packages/worker/src/
+grep -rn 'を記入' packages/worker/src/     # 何も出なければ OK
 ```
-
-**何も出なければ完了。** 1 件でも残っていれば公開しない。
 
 > **保存期間と解除方法は文案を入れてある。** いまのコードが実際に
 > やっていることに合わせた文面なので、そのままで筋が通っている。
@@ -229,6 +212,31 @@ npm run deploy
 
 DNS の A レコードは設定済みのはず（`@` と `app`、どちらも
 IPv4 `192.0.2.1`、**プロキシ オン**）。まだなら `DEPLOY.md` の手順 5 を見る。
+
+**まとめて見るならこれ 1 本。**
+
+```bash
+LP_URL=https://goldencross-incomegains.com \
+APP_URL=https://app.goldencross-incomegains.com \
+  ./scripts/diagnose.sh
+```
+
+Windows では `.\scripts\diagnose.ps1`（`$env:LP_URL` と `$env:APP_URL` を先に設定）。
+
+疎通だけでなく、**ホストを分けた目的が守れているか**を見る。
+
+| 節 | 見ているもの |
+|---|---|
+| [1] | LP が開いていること。CSP に書体の読み込み先が入っていること |
+| **[2]** | **ランキング・スクリーナー・先行登録の一覧と CSV が、LP 側で 404 になること** |
+| [3] | ダッシュボードが 200 で開かないこと（302 = Access、401 = Worker 認証） |
+| [4] | 日次パイプラインの鮮度 |
+
+この段階では [3] が「Access のログインへ飛ぶ」にならず、[4] は
+「まだ 1 度も成功していない」になる。**どちらも A の時点では正しい**
+（B5 と B4 で解消する）。
+
+手で見るなら:
 
 ```bash
 curl -sI https://goldencross-incomegains.com/ | grep -iE 'HTTP/|cf-ray'
@@ -546,6 +554,9 @@ npm run deploy
 
 警告が残っているなら、`CF_ACCESS_AUD` が別のアプリケーションのものか、
 `[env.production.vars]` ではなく既定側に貼っている。
+
+**A7 の diagnose をもう一度**走らせると、[3] が
+「Access のログインへ飛んでいる」に変わる。ここまでで全項目が ok になるはず。
 
 LP 側が閉じていないことも確認する:
 

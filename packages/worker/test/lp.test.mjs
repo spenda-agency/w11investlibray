@@ -103,6 +103,26 @@ test('LP は市場データの API を持たない', async () => {
   }
 });
 
+test('LP から先行登録の閲覧・書き出しに到達できない', async () => {
+  // **集めたメールアドレスを出す 2 本。** アプリ側（Access の後ろ）にだけ置いてある。
+  // handleLpRequest がこの 2 本を振り分けていないので 404 になるが、
+  // LP 側のルーティングに 1 行足したときに公開されうるので、ここで固定する。
+  const env = makeEnv(HOSTS);
+  await env.INVEST_DB.prepare(
+    `INSERT INTO waitlist (email, created_at, consented_at, status)
+     VALUES ('secret@example.com', '2026-01-01T00:00:00.000Z', '2026-01-01T00:00:00.000Z', 'pending')`,
+  ).run();
+
+  for (const path of ['/waitlist', '/api/waitlist.csv']) {
+    const res = await handler.fetch(req(`https://invest.example${path}`), env, ctx);
+    assert.equal(res.status, 404, `${path} が LP 側で応答している`);
+    assert.ok(
+      !(await res.text()).includes('secret@example.com'),
+      `${path} がメールアドレスを漏らしている`,
+    );
+  }
+});
+
 // ---- LP の中身 --------------------------------------------------------------
 
 test('LP に必要な要素が揃っている', async () => {
@@ -125,22 +145,31 @@ test('LP は銘柄名や価格を一切含まない', async () => {
   }
 });
 
-test('プライバシーポリシーの未記入は、事業者情報の 1 箇所だけ', async () => {
-  // 保存期間と解除方法は文案を入れてある。**事業者の名称・所在地・連絡先は
-  // 本人しか書けない**ので角括弧のまま残す。埋めずに公開しないこと。
+test('プライバシーポリシーに事業者と連絡先が出ている', async () => {
+  // **メールアドレスを集める主体が誰なのかを、本人が知り得る状態に置く。**
+  // 空に戻すと、誰が集めているのか分からないまま集めることになる。
   const env = makeEnv(HOSTS);
   const html = await (await handler.fetch(req('https://invest.example/privacy'), env, ctx)).text();
 
-  assert.match(html, /\[運営者名・所在地・連絡先を記入/, '事業者欄は角括弧のまま残す');
-  // 何を書けばよいかが角括弧の中に添えてある
-  assert.match(html, /法人なら商号と本店所在地/);
+  assert.match(html, /株式会社SPENDA/, '事業者名が出ていない');
+  assert.match(html, /contact@spenda-c\.com/, '連絡先が出ていない');
+  assert.match(html, /荒川区/, '所在地が出ていない');
 
-  // 文案を入れた 2 つが、角括弧に戻っていないこと
-  assert.ok(!html.includes('[保存期間を記入]'), '保存期間の文案が消えている');
-  assert.ok(!html.includes('[解除方法・連絡先を記入]'), '解除方法の文案が消えている');
+  // 保存期間・解除方法・取得情報の 3 つは、実装の挙動と揃っている必要がある
   assert.match(html, /速やかに削除します/);
-
+  assert.match(html, /解除/);
   assert.match(html, /IP アドレスは保存していません/);
+
+  // 角括弧のプレースホルダが戻っていないこと（preflight も同じものを見ている）
+  assert.ok(!html.includes('を記入'), '未記入のプレースホルダが残っている');
+});
+
+test('LP のフッターにも運営者と連絡先が出ている', () => {
+  // プライバシーポリシーまで開かなくても分かるようにしておく。
+  const html = lpPage({ siteName: 'X', shortName: 'X', basePath: '', appUrl: '/' });
+  assert.match(html, /株式会社SPENDA/);
+  assert.match(html, /contact@spenda-c\.com/);
+  assert.ok(!html.includes('を記入'), '未記入のプレースホルダが残っている');
 });
 
 test('ハニーポットは画面外に隠れている', () => {

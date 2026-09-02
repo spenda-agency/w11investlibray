@@ -393,7 +393,7 @@ export function lpPage(o: LpOptions): string {
     </div>
     <p class="disclaimer">本サービスは情報提供および投資判断の支援を目的としたものであり、特定の銘柄の売買を勧誘するものではありません。表示されるスコアおよびシグナルは、過去データに基づく機械的な計算結果であり、将来の価格や収益を保証するものではありません。<b>投資判断はご自身の責任で行ってください。</b></p>
     <div class="foot-bottom">
-      <p class="copyright">運営: [運営者名を記入 — 法人なら商号、個人事業なら屋号と氏名] ／ お問い合わせ: [連絡先を記入 — メールアドレスで可]</p>
+      <p class="copyright">運営: 株式会社SPENDA ／ お問い合わせ: <a href="mailto:contact@spenda-c.com">contact@spenda-c.com</a></p>
     </div>
   </div>
 </footer>

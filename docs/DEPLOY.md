@@ -52,14 +52,21 @@ npx wrangler d1 create invest-db
 npx wrangler r2 bucket create invest-snapshots
 ```
 
-**出力された `database_id` を `wrangler.toml` の 2 箇所に貼る。**
+**出力された `database_id` を `wrangler.toml` の 2 箇所に書き込む。**
+
+```bash
+npx wrangler d1 create invest-db | npm run set:db-id
+# 手で渡すなら（出力をまるごと貼ってもよい）
+npm run set:db-id -- 'a1b2c3d4-5e6f-7890-abcd-ef1234567890'
+```
 
 | 場所 | 何のためか |
 |---|---|
 | `[[d1_databases]]`（既定） | `wrangler dev` / `db:migrate:local` |
 | `[[env.production.d1_databases]]` | **本番。`preflight` が見ているのはこちらだけ** |
 
-既定側を忘れても `preflight` は止まらない。同じ id を両方に入れておくこと。
+既定側を忘れても `preflight` は止まらないので、スクリプトが両方に書く。
+同じ id を再度渡しても何も起きない（冪等）。UUID が 2 個以上あれば書かずに止まる。
 
 ```bash
 npm run db:migrate:remote -w @invest/worker   # 0001 と 0002 を順に適用する
@@ -195,14 +202,32 @@ npm run check:datasource
 続けて Worker 側:
 
 ```bash
-BASE_URL=https://app.goldencross-incomegains.com ./scripts/diagnose.sh
+LP_URL=https://goldencross-incomegains.com \
+APP_URL=https://app.goldencross-incomegains.com \
+  ./scripts/diagnose.sh
 ```
 
 Windows では `.\scripts\diagnose.ps1`（`.sh` は PowerShell では動かない）。
+`$env:LP_URL` と `$env:APP_URL` を先に設定する。
 
-`workers_dev = false` なので `*.workers.dev` の URL は存在しない。
-`BASE_URL` には必ず実ドメインを入れる。**この診断は手順 9（Access）より前に**
-走らせること。
+**LP とアプリの 2 つを渡す。** ホストを分けてあるので、片方だけでは判断できない。
+省略するとローカル（`wrangler dev`）の既定
+——LP が `http://localhost:8787/lp`、アプリが `http://localhost:8787`——になる。
+
+疎通のほかに、**ホストを分けた目的が守れているか**を見ている。
+
+| 節 | 見ているもの |
+|---|---|
+| [1] | LP が開いていること。CSP に `fonts.googleapis.com` が入っていること |
+| **[2]** | **ランキング・スクリーナー・先行登録の一覧と CSV が、LP 側で 404 になること** |
+| [3] | ダッシュボードが 200 で開かないこと（302 = Access、401 = Worker 認証） |
+| [4] | 日次パイプラインの鮮度（LP 側の `/api/health` を読む） |
+
+`workers_dev = false` なので `*.workers.dev` の URL は存在しない。必ず実ドメインを入れる。
+
+**手順 9（Access）の前後で結果が変わる。** 前は [3] が「200 = 誰でも見られる」、
+後は「302 = Access のログインへ飛んでいる」。**両方の時点で走らせて、
+[3] が切り替わることを確かめる**のがいちばん確実な Access の確認方法。
 
 ---
 

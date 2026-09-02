@@ -15,6 +15,12 @@ const CONFIG_PATH = fileURLToPath(
 );
 const config = readFileSync(CONFIG_PATH, 'utf8');
 
+/**
+ * 運営者情報を書く場所。**角括弧が残っていたらデプロイを止める。**
+ * `docs/GO-LIVE.md` の A5。
+ */
+const OPERATOR_FILES = ['packages/worker/src/routes/lp.ts', 'packages/worker/src/ui/lp.ts'];
+
 const errors = [];
 const warnings = [];
 
@@ -101,6 +107,29 @@ if (prod !== null) {
       'docs/DATA-SOURCES.md の「再配信の可否」が埋まっているか確認する',
     ]);
   }
+}
+
+// --- 運営者情報の未記入 ------------------------------------------------------
+// **LP は公開した瞬間からメールアドレスを集め始める。**
+// 誰が集めているのかが分からない状態で集めてはいけないので、警告ではなく停止。
+// 逃げ道（環境変数で無効化）は作らない。作れば使われる。
+//
+// CI では走らない（.github/workflows/ci.yml は typecheck / test / verify-seed だけ）。
+const unfilled = [];
+for (const rel of OPERATOR_FILES) {
+  const source = readFileSync(fileURLToPath(new URL(`../${rel}`, import.meta.url)), 'utf8');
+  source.split('\n').forEach((line, i) => {
+    if (line.includes('を記入')) unfilled.push(`${rel}:${i + 1}`);
+  });
+}
+if (unfilled.length > 0) {
+  errors.push([
+    '運営者情報が未記入のまま',
+    'LP は公開した瞬間からメールアドレスを集め始める。\n' +
+      '    誰が集めているのかが分からない状態で集めてはいけない。\n' +
+      `    角括弧を実際の名称・所在地・連絡先で置き換える:\n      ${unfilled.join('\n      ')}\n` +
+      '    書き方は docs/GO-LIVE.md の A5',
+  ]);
 }
 
 // --- workers.dev -----------------------------------------------------------

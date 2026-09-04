@@ -45,12 +45,20 @@ npm run dev
 
 ## 3. Cloudflare の資源を作る
 
+**R2 は先にダッシュボードで有効化する。**
+していないと `Please enable R2 through the Cloudflare Dashboard [code: 10042]`
+で止まる（dash.cloudflare.com → 左メニュー R2 → 有効化）。
+
 ```bash
 cd packages/worker
 
 npx wrangler d1 create invest-db
 npx wrangler r2 bucket create invest-snapshots
 ```
+
+R2 は Phase 1 でも要る。日次パイプラインの最後の工程（`writeSnapshot`）が
+その日のランキングを R2 に置き、画面はまずそこを読む。この工程は `try` の中に
+あるので、**バケットが無いとパイプライン全体が失敗扱いになる。**
 
 **出力された `database_id` を `wrangler.toml` の 2 箇所に書き込む。**
 

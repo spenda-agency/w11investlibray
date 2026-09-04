@@ -53,24 +53,57 @@ const CONFIG_PATH = fileURLToPath(
   new URL('../packages/worker/wrangler.toml', import.meta.url),
 );
 
+/**
+ * 標準入力を読む。**待ち続けない。**
+ *
+ * Windows で `npx wrangler d1 create … | npm run set:db-id` と繋ぐと、
+ * npm の cmd シムを挟むので標準入力が渡ってこないことがある。
+ * その場合 `for await` が永久に待つ——**固まるより、早く諦めて
+ * 引数で渡すよう言うほうがよい。**
+ *
+ * 返り値: 読めた文字列 / `null`（何も来なかった）
+ */
+const STDIN_TIMEOUT_MS = 3000;
+
 async function readStdin() {
-  if (process.stdin.isTTY) return '';
-  const chunks = [];
-  for await (const chunk of process.stdin) chunks.push(chunk);
-  return Buffer.concat(chunks).toString('utf8');
+  let timer;
+  const timeout = new Promise((resolve) => {
+    timer = setTimeout(() => resolve(null), STDIN_TIMEOUT_MS);
+  });
+  const read = (async () => {
+    const chunks = [];
+    for await (const chunk of process.stdin) chunks.push(chunk);
+    return Buffer.concat(chunks).toString('utf8');
+  })();
+
+  const got = await Promise.race([read, timeout]);
+  clearTimeout(timer);
+  return got;
 }
+
+const USAGE =
+  "  npm run set:db-id -- 'a1b2c3d4-5e6f-7890-abcd-ef1234567890'\n" +
+  '  npx wrangler d1 create invest-db | npm run set:db-id\n' +
+  '（wrangler の出力をまるごと貼っても拾う）';
 
 async function main() {
   const fromArgs = process.argv.slice(2).join(' ').trim();
-  const input = fromArgs || (await readStdin());
+
+  // 端末から直接呼ばれた（パイプが繋がっていない）なら、標準入力を待たない。
+  const pipeAttached = !process.stdin.isTTY;
+  const piped = fromArgs || !pipeAttached ? null : await readStdin();
+  const input = fromArgs || piped || '';
+
+  if (!fromArgs && pipeAttached && piped === null) {
+    // パイプは繋がっているのに何も流れてこない。**Windows でよく起きる。**
+    console.error('✗ 標準入力から何も届かなかった（3 秒待った）');
+    console.error('    パイプが効いていない可能性がある。id を引数で渡すこと:');
+    console.error(`\n${USAGE}`);
+    process.exit(1);
+  }
 
   if (!input.trim()) {
-    console.error(
-      'id を渡すこと。\n' +
-        "  npm run set:db-id -- 'a1b2c3d4-5e6f-7890-abcd-ef1234567890'\n" +
-        '  npx wrangler d1 create invest-db | npm run set:db-id\n' +
-        '（wrangler の出力をまるごと貼っても拾う）',
-    );
+    console.error(`id を渡すこと。\n${USAGE}`);
     process.exit(1);
   }
 

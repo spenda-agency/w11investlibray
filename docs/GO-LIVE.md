@@ -37,9 +37,10 @@ Cron（平日 19:30）は HTTP のエッジを通らず Worker を直接起動�
 
 ```
 トラック A — LP を公開する
+  [ ] A0  リポジトリを手元に用意する   ← 以降はすべてこの中で打つ
   [ ] A1  wrangler にログインする
   [ ] A2  D1 を作り、npm run set:db-id で id を書き込む
-  [ ] A3  R2 バケットを作る
+  [ ] A3  R2 を有効化してバケットを作る
   [ ] A4  マイグレーションを本番の D1 に流す
   [x] A5  運営者名・所在地・連絡先を書く   ← 記入済み。preflight が未記入を止める
   [ ] A6  preflight を通してデプロイする
@@ -64,41 +65,74 @@ Cron（平日 19:30）は HTTP のエッジを通らず Worker を直接起動�
 
 ---
 
+> **どのコマンドも、リポジトリの中で打つ。**
+> `npm run …` はカレントディレクトリの `package.json` を見るので、
+> 外で打つと `npm error ENOENT … package.json` で全部落ちる。
+
+---
+
 # トラック A — LP を公開する
+
+## A0. リポジトリを手元に用意する
+
+**ここを飛ばすと A2・A4・A6 がまとめて失敗する。**
+
+```powershell
+cd ~\Documents                    # 置きたい場所へ
+git clone https://github.com/spenda-agency/w11investlibray.git
+cd w11investlibray
+npm install
+npm test
+```
+
+bash なら `cd ~/Documents` 以降は同じ。
+
+| | |
+|---|---|
+| 必要なもの | Git、**Node.js 22 以上**（`node -v` で確認） |
+| ブランチ | 指定は要らない。既定が作業ブランチになっている |
+| `npm test` を置く理由 | **ネットワークも API キーも不要**で 230 件走る。ここが通れば、clone と Node の版は問題ない。`npm run deploy` で初めて気づくより早い |
+
+**以降のコマンドはすべてこの `w11investlibray` の中で打つ。**
+プロンプトが `PS C:\Users\…\w11investlibray>` になっていることを確かめる。
+
+---
 
 ## A1. wrangler にログインする
 
-```bash
-cd packages/worker
+```powershell
 npx wrangler login
+npx wrangler whoami      # アカウントが合っているか確認
 ```
 
 ブラウザが開いて Cloudflare の認証に飛ぶ。許可すると端末に戻る。
 
-```bash
-npx wrangler whoami      # アカウントが合っているか確認
-```
-
 **ドメインを置いているアカウントでログインすること。** 別アカウントだと
 デプロイは通るのにルートが一致せず、ドメインが 404 になる。
 
-> **Windows の場合**: `wrangler` は必ずリポジトリの中で実行する。
-> ホームディレクトリで走らせると `Application Data` の権限エラーになる。
+> **Windows では、リポジトリの中で実行する。** ホームディレクトリで走らせると
+> `Application Data` の権限エラーになることがある。
 
 ---
 
 ## A2. D1 を作り、`database_id` を 2 箇所に貼る
 
+**Windows ではこちら。** 出力に出る `database_id` をコピーして渡す。
+
+```powershell
+npx wrangler d1 create invest-db
+npm run set:db-id -- 'a1b2c3d4-5e6f-7890-abcd-ef1234567890'
+```
+
+bash ならパイプで繋げる（出力から id を拾う）。
+
 ```bash
 npx wrangler d1 create invest-db | npm run set:db-id
 ```
 
-パイプで繋げば、出力から id を拾って `wrangler.toml` に書き込む。
-手でコピーしたいなら、出力をまるごと貼っても id だけ渡してもよい。
-
-```bash
-npm run set:db-id -- 'a1b2c3d4-5e6f-7890-abcd-ef1234567890'
-```
+> **PowerShell でパイプにしない。** npm の cmd シムを挟むと標準入力が
+> 渡ってこないことがある。その場合スクリプトは 3 秒で諦めて
+> 「引数で渡すこと」と言って終わる（固まりはしない）。
 
 ```
 ✓ database_id を 2 箇所に書き込んだ: a1b2c3d4-5e6f-7890-abcd-ef1234567890
@@ -118,33 +152,51 @@ UUID が 2 個以上見つかったら、**書かずに止まる**。
 
 ---
 
-## A3. R2 バケットを作る
+## A3. R2 を有効化して、バケットを作る
 
-```bash
+**先にダッシュボードで R2 を有効化する。** ここを飛ばすと次のエラーになる。
+
+```
+✘ [ERROR] Please enable R2 through the Cloudflare Dashboard. [code: 10042]
+```
+
+```
+dash.cloudflare.com → 左メニュー R2 → 有効化（規約に同意）
+```
+
+Workers Paid に入っていれば支払い情報は登録済みなので、同意だけで済むはず。
+有効化したら:
+
+```powershell
 npx wrangler r2 bucket create invest-snapshots
 ```
 
-Phase 1 ではまだ中身を使わないが、バインディングが解決できないと
-デプロイが失敗するので先に作る。
+**なぜ Phase 1 でも要るのか。** 日次パイプラインの最後の工程
+（`dailyPipeline.ts` の `writeSnapshot`）が、その日のランキングを R2 に置く。
+画面はまずここを読むので、D1 が重いときでもトップページが返る。
+この工程は `try` の中にあるので、**バケットが無いとパイプライン全体が
+失敗扱いになる**（トラック B4 で効いてくる）。
+
+トラック A（LP の公開）では中身を使わないが、`wrangler.toml` に
+バインディングがあるので、**バケットが無いと deploy が通らない。**
 
 ---
 
 ## A4. マイグレーションを本番の D1 に流す
 
-```bash
-cd /path/to/w11investlibray
+```powershell
 npm run db:migrate:remote -w @invest/worker
 ```
 
 `0001_init.sql`（17 テーブル）と `0002_waitlist.sql`（先行登録）が順に適用される。
 このスクリプトには `--env production` が入っているので、本番の D1 を指す。
 
-確認:
+確認（PowerShell は行継続がバッククォート `` ` ``。1 行で書いてもよい）:
 
-```bash
-cd packages/worker
-npx wrangler d1 execute invest-db --remote --env production \
-  --command "SELECT name FROM sqlite_master WHERE type='table' ORDER BY name"
+```powershell
+cd packages\worker
+npx wrangler d1 execute invest-db --remote --env production --command "SELECT name FROM sqlite_master WHERE type='table'"
+cd ..\..
 ```
 
 `waitlist` が一覧にあること。無ければ `0002` が流れていない。
@@ -213,7 +265,15 @@ npm run deploy
 DNS の A レコードは設定済みのはず（`@` と `app`、どちらも
 IPv4 `192.0.2.1`、**プロキシ オン**）。まだなら `DEPLOY.md` の手順 5 を見る。
 
-**まとめて見るならこれ 1 本。**
+**まとめて見るならこれ 1 本。** Windows はこちら。
+
+```powershell
+$env:LP_URL="https://goldencross-incomegains.com"
+$env:APP_URL="https://app.goldencross-incomegains.com"
+.\scripts\diagnose.ps1
+```
+
+bash なら:
 
 ```bash
 LP_URL=https://goldencross-incomegains.com \
@@ -221,7 +281,9 @@ APP_URL=https://app.goldencross-incomegains.com \
   ./scripts/diagnose.sh
 ```
 
-Windows では `.\scripts\diagnose.ps1`（`$env:LP_URL` と `$env:APP_URL` を先に設定）。
+> **`LP_URL=… ` の形は PowerShell では動かない**（`用語 'LP_URL=…' は認識されません`）。
+> PowerShell の環境変数は `$env:名前="値"` を**先の行で**設定する。
+> 行継続も `\` ではなくバッククォート `` ` ``。
 
 疎通だけでなく、**ホストを分けた目的が守れているか**を見る。
 
@@ -312,10 +374,10 @@ Method を絞らないと、無害な GET でも枠を消費して、
 
 D1 に入ったかを見る:
 
-```bash
-cd packages/worker
-npx wrangler d1 execute invest-db --remote --env production \
-  --command "SELECT email, created_at, consented_at, status FROM waitlist"
+```powershell
+cd packages\worker
+npx wrangler d1 execute invest-db --remote --env production --command "SELECT email, consented_at, status FROM waitlist"
+cd ..\..
 ```
 
 | 見るところ | 期待 |
@@ -333,10 +395,12 @@ npx wrangler d1 execute invest-db --remote --env production \
 
 ## B1. J-Quants の API キーを Secret に登録する
 
-```bash
-cd packages/worker
+```powershell
+cd packages\worker
 npx wrangler secret put JQUANTS_API_KEY --env production
 # → プロンプトが出るのでキーを貼って Enter
+npx wrangler secret list --env production      # 入ったか確認
+cd ..\..
 ```
 
 ### **`--env production` を落とさないこと**
@@ -364,9 +428,8 @@ npx wrangler secret list --env production
 
 ## B2. 疎通を確認し、プラン情報を記録する
 
-```bash
-cd /path/to/w11investlibray
-export JQUANTS_API_KEY="..."        # Windows: $env:JQUANTS_API_KEY="..."
+```powershell
+$env:JQUANTS_API_KEY="..."          # bash: export JQUANTS_API_KEY="..."
 npm run check:datasource
 ```
 
@@ -424,11 +487,12 @@ Actions タブ → 左の一覧から **「バックフィル」** → Run workf
 
 ### 手元で回す
 
-```bash
-export JQUANTS_API_KEY="..."
+```powershell
+$env:JQUANTS_API_KEY="..."
 npm run backfill -- --from 2024-01-01 --to 2026-08-27 --out out/backfill.sql
-cd packages/worker
+cd packages\worker
 npx wrangler d1 execute invest-db --remote --env production --file=../../out/backfill.sql
+cd ..\..
 ```
 
 ここでも **`--env production` が要る**（B1 と同じ理由。付けないと既定の

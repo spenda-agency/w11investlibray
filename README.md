@@ -65,10 +65,19 @@ docs/             設計・スコア定義・データソースの利用条件
 ## セットアップ
 
 ```bash
+git clone https://github.com/spenda-agency/w11investlibray.git
+cd w11investlibray
 npm install
 npm run typecheck
-npm test              # ネットワーク不要
+npm test              # ネットワーク不要。API キーも要らない
 ```
+
+Node.js 22 以上が要る。**以降のコマンドはすべてこのディレクトリの中で打つ**
+（`npm run …` はカレントの `package.json` を見るので、外で打つと
+`npm error ENOENT … package.json` になる）。
+
+**公開まで進めるなら [`docs/GO-LIVE.md`](./docs/GO-LIVE.md) へ。**
+上から順にやれば公開できる形にしてある。
 
 ### データソースの疎通確認
 
@@ -76,6 +85,8 @@ npm test              # ネットワーク不要
 export JQUANTS_API_KEY="..."      # https://jpx-jquants.com/ で取得
 npm run check:datasource
 ```
+
+Windows は `$env:JQUANTS_API_KEY="..."`。
 
 契約プラン・取得可能な期間・**API が実際に返した項目名**を表示する。
 結果は [`docs/DATA-SOURCES.md`](docs/DATA-SOURCES.md) に記録すること。

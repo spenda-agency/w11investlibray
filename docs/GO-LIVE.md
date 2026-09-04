@@ -134,6 +134,25 @@ npx wrangler d1 create invest-db | npm run set:db-id
 > 渡ってこないことがある。その場合スクリプトは 3 秒で諦めて
 > 「引数で渡すこと」と言って終わる（固まりはしない）。
 
+### `A database with that name already exists` と出たら
+
+**作り直さない。既にあるものの id を引く。**
+
+```powershell
+npx wrangler d1 list          # invest-db の行の uuid を見る
+npx wrangler d1 info invest-db
+```
+
+出てきた uuid を `set:db-id` に渡す。`d1 create` は一度成功していれば
+DB が残っているので、**このエラーは「もう作ってある」という意味**でしかない。
+
+> パイプに繋いだ `d1 create` が npm 側のエラーで落ちた場合、
+> **DB は作られていて id だけが失われている。** 上の 2 つで引き直せる。
+
+`set:db-id` に渡すのは**実際の uuid**（`a1b2c3d4-5e6f-7890-abcd-ef1234567890`
+のような 36 文字）。プレースホルダの文字列をそのまま渡すと
+`✗ UUID が見つからない` と言って、**何も書かずに止まる**。
+
 ```
 ✓ database_id を 2 箇所に書き込んだ: a1b2c3d4-5e6f-7890-abcd-ef1234567890
     次は npm run db:migrate:remote -w @invest/worker

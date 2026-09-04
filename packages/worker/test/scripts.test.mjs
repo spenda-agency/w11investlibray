@@ -112,3 +112,45 @@ test('database_id を 2 箇所とも書き換える', () => {
   // 同じ id をもう一度当てても変わらない（冪等）
   assert.equal(applyDatabaseId(text, id).changed, false);
 });
+
+// ---- diagnose の 2 版がずれないこと ---------------------------------------
+
+test('diagnose.sh と .ps1 が同じ経路を検査している', () => {
+  // **片方だけ直して片方を忘れる**のが起きやすい。実際 .sh にモード判定を足した
+  // ときに .ps1 へ入れ忘れ、/api/health の 503 を NG と報告する状態になっていた。
+  const sh = readFileSync(join(SCRIPTS_DIR, 'diagnose.sh'), 'utf8');
+  const ps = readFileSync(join(SCRIPTS_DIR, 'diagnose.ps1'), 'utf8');
+
+  const paths = [
+    '/api/ranking', '/screener', '/api/symbol/X',
+    '/waitlist', '/api/waitlist.csv',        // ← 漏れるとメールアドレスが公開される
+    '/robots.txt', '/sitemap.xml', '/api/health',
+  ];
+  for (const p of paths) {
+    assert.ok(sh.includes(p), `diagnose.sh が ${p} を見ていない`);
+    assert.ok(ps.includes(p), `diagnose.ps1 が ${p} を見ていない`);
+  }
+
+  // 本番／ローカルで期待値を変える仕組みが両方にあること
+  for (const [name, text] of [['diagnose.sh', sh], ['diagnose.ps1', ps]]) {
+    assert.match(text, /prod/, `${name} にモード判定が無い`);
+    assert.match(text, /local/, `${name} にモード判定が無い`);
+    assert.match(text, /503/, `${name} が /api/health の 503 を許していない`);
+  }
+});
+
+test('diagnose.ps1 は PowerShell 7 専用の引数を使わない', () => {
+  // -SkipHttpErrorCheck は PS7 で追加された。5.1（Windows 標準）では
+  // 全 URL が例外になり、全項目 0 になる。実際にそうなった。
+  const ps = readFileSync(join(SCRIPTS_DIR, 'diagnose.ps1'), 'utf8');
+  const calls = ps
+    .split('\n')
+    .filter((line) => !line.trim().startsWith('#'))   // 説明のコメントは除く
+    .join('\n');
+  assert.ok(
+    !calls.includes('-SkipHttpErrorCheck'),
+    'PowerShell 5.1 に無い -SkipHttpErrorCheck を使っている',
+  );
+  // 5.1 が IE のエンジンに依存しないように
+  assert.match(calls, /-UseBasicParsing/);
+});

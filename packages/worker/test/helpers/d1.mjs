@@ -9,6 +9,38 @@ import { fileURLToPath } from 'node:url';
  * インデックスの効かない JOIN が本番まで残る。ここでは本物の SQLite に
  * 本物のスキーマを流して検証する。
  */
+/**
+ * `?1` `?2` … を、**出現順の無印 `?`** に展開する。
+ *
+ * **なぜ要るのか。** `node:sqlite` に位置引数を渡したときの束縛の仕方が
+ * Node の版によって違う。この環境（v22.22.2）では「`?N` の最大番号」までしか
+ * 束縛できず、それを超えると `column index out of range`（SQLITE_RANGE）に
+ * なる。別の版では `?` の出現数で数えるらしく、`(?1, ?2, ?2)` に 2 引数を
+ * 渡しただけで同じエラーが出る（Windows で実際に踏んだ）。
+ *
+ * 無印 `?` だけの経路はどの版でも同じなので、**そこへ寄せて版差を消す。**
+ *
+ *   'VALUES (?1, ?2, ?2)' + [x, y]  →  'VALUES (?, ?, ?)' + [x, y, y]
+ *   'VALUES (?2, ?1)'     + [x, y]  →  'VALUES (?, ?)'    + [y, x]
+ *   'VALUES (?, ?, ?)'    + [x,y,z] →  そのまま（無印は触らない）
+ *
+ * **製品コードの SQL は変えていない。** `?N` は src/db/queries.ts を中心に
+ * 100 箇所ほどで使っていて、本番の D1 はこの書き方を正しく扱う。
+ * ここで吸収するのはテスト用のシムの都合。
+ *
+ * 既知の限界: 文字列リテラルの中に `?1` があると誤って書き換わる。
+ * いまの SQL には無い。壊れれば既存のテストが落ちるので気づける。
+ */
+export function expandPlaceholders(sql, params) {
+  const ordered = [];
+  const text = sql.replace(/\?(\d+)/g, (_match, index) => {
+    ordered.push(params[Number(index) - 1]);
+    return '?';
+  });
+  // `?N` が 1 つも無ければ無印なので、そのまま通す
+  return ordered.length === 0 ? { sql, params } : { sql: text, params: ordered };
+}
+
 class Stmt {
   constructor(db, sql) {
     this.db = db;
@@ -20,18 +52,23 @@ class Stmt {
     next.params = params.map(normalise);
     return next;
   }
-  #prepared() {
-    return this.db.prepare(this.sql);
+  /** 展開してから prepare する。返すのは文と、それに合わせて並べ直した値。 */
+  #ready() {
+    const { sql, params } = expandPlaceholders(this.sql, this.params);
+    return { stmt: this.db.prepare(sql), params };
   }
   async all() {
-    return { results: this.#prepared().all(...this.params), success: true };
+    const { stmt, params } = this.#ready();
+    return { results: stmt.all(...params), success: true };
   }
   async first() {
-    const row = this.#prepared().get(...this.params);
+    const { stmt, params } = this.#ready();
+    const row = stmt.get(...params);
     return row === undefined ? null : row;
   }
   async run() {
-    const info = this.#prepared().run(...this.params);
+    const { stmt, params } = this.#ready();
+    const info = stmt.run(...params);
     return { success: true, meta: { changes: info.changes } };
   }
 }
@@ -61,7 +98,8 @@ export class FakeD1 {
     this.db.exec(sql);
   }
   query(sql, ...params) {
-    return this.db.prepare(sql).all(...params);
+    const e = expandPlaceholders(sql, params.map(normalise));
+    return this.db.prepare(e.sql).all(...e.params);
   }
 }
 

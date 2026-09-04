@@ -9,6 +9,11 @@
 #   - 市場データと先行登録の一覧が、公開側から取れないこと
 #   - ダッシュボードが、認証なしで開かないこと
 #
+# **Windows PowerShell 5.1 でも動く。** Invoke-WebRequest の -SkipHttpErrorCheck は
+# PowerShell 7 で追加された引数で、5.1 には無い。使うと全 URL が例外になり、
+# 全項目が 0 になる（実際にそうなった）。5.1 は Windows に最初から入っている版なので、
+# ここを既定と考える。
+#
 # このファイルは UTF-8 BOM 付きで保存すること。
 # BOM が無いと PowerShell 5.1 が Shift-JIS として読み、日本語が化けて構文が壊れる。
 # packages/worker/test/scripts.test.mjs がこれを検査している。
@@ -17,8 +22,14 @@ $ErrorActionPreference = "Continue"
 $LpUrl  = if ($env:LP_URL)  { $env:LP_URL.TrimEnd('/') }  else { "http://localhost:8787/lp" }
 $AppUrl = if ($env:APP_URL) { $env:APP_URL.TrimEnd('/') } else { "http://localhost:8787" }
 
+# 本番（https の実ドメイン）かローカルかで、期待値が変わる項目がある。
+#   - sitemap.xml は絶対 URL を作れないローカルでは 404 を返す（設計どおり）
+#   - Access はローカルには掛からないので、アプリ側が 200 でも正しい
+$mode = if ($LpUrl -like "https://*") { "prod" } else { "local" }
+
 Write-Host "LP  : $LpUrl"
 Write-Host "アプリ: $AppUrl"
+Write-Host "モード: $mode"
 Write-Host ""
 
 $failed = 0
@@ -26,46 +37,72 @@ $failed = 0
 function Get-Status {
     param([string]$Url)
     try {
-        $res = Invoke-WebRequest -Uri $Url -Method GET -TimeoutSec 15 -SkipHttpErrorCheck `
-            -MaximumRedirection 0 -ErrorAction SilentlyContinue
+        # -UseBasicParsing: 5.1 が IE のエンジンに依存するのを避ける
+        # -MaximumRedirection 0: 3xx を例外にして、Access の転送を捕まえる
+        $res = Invoke-WebRequest -Uri $Url -Method GET -TimeoutSec 15 `
+            -UseBasicParsing -MaximumRedirection 0 -ErrorAction Stop
         return [int]$res.StatusCode
     } catch {
-        if ($_.Exception.Response) { return [int]$_.Exception.Response.StatusCode }
-        return 0
+        # 5.1 は 3xx/4xx/5xx を例外にする。応答があるなら状態コードを取り出す。
+        # 5.1 は HttpStatusCode、7 は int。どちらも [int] で通る。
+        $r = $_.Exception.Response
+        if ($r -and $r.StatusCode) { return [int]$r.StatusCode }
+        return 0   # 接続そのものが失敗（名前が引けない・到達しない）
     }
 }
+
+# 状態コードを桁の揃う位置に出す（和文ラベルは桁が揃わないので後ろへ回す）
+function Write-Ok   { param($Code, $Label) Write-Host ("  ok   {0,3}  {1}" -f $Code, $Label) }
+function Write-Ng   { param($Code, $Label) Write-Host ("  NG   {0,3}  {1}" -f $Code, $Label); $script:failed = 1 }
+function Write-Skip { param($Code, $Label) Write-Host ("  --   {0,3}  {1}" -f $Code, $Label) }
 
 function Test-Status {
     param([string]$Label, [string]$Url, [int]$Expect)
     $got = Get-Status $Url
-    if ($got -eq $Expect) {
-        Write-Host ("  ok   {0,-30} {1}" -f $Label, $got)
-    } else {
-        Write-Host ("  NG   {0,-30} {1}（期待 {2}）" -f $Label, $got, $Expect)
-        $script:failed = 1
-    }
+    if ($got -eq $Expect) { Write-Ok $got $Label }
+    else { Write-Ng $got "$Label（期待 $Expect）" }
 }
 
 Write-Host "[1] LP が開いていること"
-Test-Status "トップ"             "$LpUrl/"            200
-Test-Status "監視用 /api/health"  "$LpUrl/api/health"  200
-Test-Status "robots.txt"         "$LpUrl/robots.txt"  200
-Test-Status "sitemap.xml"        "$LpUrl/sitemap.xml" 200
+Test-Status "トップ"     "$LpUrl/"           200
+Test-Status "robots.txt" "$LpUrl/robots.txt" 200
 
+# **/api/health は 200 とは限らない。** 更新が止まっていると 503 を返す
+# （監視から失敗として見えるように、意図してそうしてある）。
+# ここでは「応答すること」だけ見て、中身の判定は [4] に任せる。
+$healthStatus = Get-Status "$LpUrl/api/health"
+if ($healthStatus -eq 200 -or $healthStatus -eq 503) {
+    Write-Ok $healthStatus "監視用 /api/health（中身は [4]）"
+} else {
+    Write-Ng $healthStatus "監視用 /api/health（期待 200 か 503）"
+}
+
+# sitemap は絶対 URL を組めないと 404 を返す。ローカルではそれが正しい。
+$sitemapStatus = Get-Status "$LpUrl/sitemap.xml"
+if ($mode -eq "prod") {
+    if ($sitemapStatus -eq 200) { Write-Ok $sitemapStatus "sitemap.xml" }
+    else { Write-Ng $sitemapStatus "sitemap.xml（期待 200）" }
+} else {
+    Write-Skip $sitemapStatus "sitemap.xml — ローカルでは 404 が正しい"
+}
+
+$csp = $null
 try {
-    $head = Invoke-WebRequest -Uri "$LpUrl/" -Method GET -TimeoutSec 15 -SkipHttpErrorCheck
+    $head = Invoke-WebRequest -Uri "$LpUrl/" -Method GET -TimeoutSec 15 `
+        -UseBasicParsing -ErrorAction Stop
     $csp = $head.Headers["Content-Security-Policy"]
-    if (-not $csp) {
-        Write-Host "  NG   CSP ヘッダが無い"
-        $failed = 1
-    } elseif ($csp -like "*fonts.googleapis.com*") {
-        Write-Host "  ok   CSP に書体の読み込み先が入っている"
-    } else {
-        Write-Host "  NG   CSP に fonts.googleapis.com が無い → Noto Sans JP が黙って落ちる"
-        $failed = 1
-    }
 } catch {
-    Write-Host "  NG   CSP を確認できなかった: $_"
+    # エラー応答でもヘッダは読める（5.1 は例外側に入る）
+    $r = $_.Exception.Response
+    if ($r) { try { $csp = $r.Headers["Content-Security-Policy"] } catch { } }
+}
+if (-not $csp) {
+    Write-Host "  NG   CSP ヘッダが無い（またはページを取得できなかった）"
+    $failed = 1
+} elseif ($csp -like "*fonts.googleapis.com*") {
+    Write-Host "  ok   CSP に書体の読み込み先が入っている"
+} else {
+    Write-Host "  NG   CSP に fonts.googleapis.com が無い → Noto Sans JP が黙って落ちる"
     $failed = 1
 }
 Write-Host ""
@@ -82,26 +119,43 @@ Write-Host ""
 Write-Host "[3] ダッシュボードが閉じていること"
 $appStatus = Get-Status "$AppUrl/"
 if ($appStatus -ge 301 -and $appStatus -le 308) {
-    Write-Host "  ok   $appStatus — Cloudflare Access のログインへ飛んでいる"
+    Write-Ok $appStatus "Cloudflare Access のログインへ飛んでいる"
 } elseif ($appStatus -eq 401 -or $appStatus -eq 403) {
-    Write-Host "  ok   $appStatus — Worker 側で認証を要求している"
+    Write-Ok $appStatus "Worker 側で認証を要求している"
 } elseif ($appStatus -eq 200) {
-    Write-Host "  NG   200 — **ダッシュボードが誰でも見られる**"
-    Write-Host "       → Access が未設定（docs/GO-LIVE.md の B5）か、"
-    Write-Host "         workers_dev を true に戻していないか確認する"
-    $failed = 1
+    if ($mode -eq "prod") {
+        Write-Ng $appStatus "**ダッシュボードが誰でも見られる**"
+        Write-Host "            → Access が未設定（docs/GO-LIVE.md の B5）か、"
+        Write-Host "              workers_dev を true に戻していないか確認する"
+    } else {
+        Write-Skip $appStatus "ローカルには Access が掛からない。本番で必ず確認すること"
+    }
 } else {
-    Write-Host "  NG   $appStatus — 想定外。ルートと DNS を確認する"
-    $failed = 1
+    Write-Ng $appStatus "想定外。ルートと DNS を確認する"
 }
 Write-Host ""
 
 Write-Host "[4] パイプラインの鮮度"
 # LP 側の /api/health を読む。Access の外なので、掛けたあとも読める。
+# **/api/health は更新が止まっていると 503 を返す。** 5.1 ではそれが例外になるので、
+# 例外側からも本文を取り出す。ここで本文が取れないと [4] の判定ができない。
+$health = "{}"
 try {
-    $health = (Invoke-WebRequest -Uri "$LpUrl/api/health" -Method GET -TimeoutSec 15 -SkipHttpErrorCheck).Content
+    $health = (Invoke-WebRequest -Uri "$LpUrl/api/health" -Method GET -TimeoutSec 15 `
+        -UseBasicParsing -ErrorAction Stop).Content
 } catch {
-    $health = "{}"
+    if ($_.ErrorDetails -and $_.ErrorDetails.Message) {
+        $health = $_.ErrorDetails.Message          # PowerShell 7 はここに本文が入る
+    } else {
+        $r = $_.Exception.Response                 # Windows PowerShell 5.1
+        if ($r) {
+            try {
+                $sr = New-Object System.IO.StreamReader($r.GetResponseStream())
+                $health = $sr.ReadToEnd()
+                $sr.Close()
+            } catch { }
+        }
+    }
 }
 Write-Host "  $health"
 if ($health -like '*"status":"ok"*') {

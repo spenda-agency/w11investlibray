@@ -295,6 +295,41 @@ dash.cloudflare.com → Workers & Pages → w11-invest-library-production
 > **一度この状態でデプロイすると Cron だけ空のまま残る。**
 > その場合は直して `npm run deploy` をやり直せば揃う。
 
+#### `You need a workers.dev subdomain … [code: 10063]` が出たとき
+
+```
+- You need a workers.dev subdomain in order to proceed. Please go to the
+  dashboard and open the Workers menu. [code: 10063]
+```
+
+**アカウントがまだ一度も Workers の画面を開いていない**という意味。
+Cloudflare のアカウントには `<好きな名前>.workers.dev` というサブドメインが
+1 つ紐づくが、これは初回にダッシュボードを開いたときに発行される。
+**Cron の登録 API がその存在を前提にしている**ので、
+Cron を workers.dev で使うつもりが無くても弾かれる。
+
+直し方——ダッシュボードを一度開くだけ。
+
+```
+dash.cloudflare.com → 左メニュー Compute (Workers)
+  → サブドメイン名を決める画面が出るので、好きな名前で確定する
+```
+
+そのあと `npm run deploy` をやり直す。ルートは張り直しになるだけで害は無い。
+
+> **`wrangler.toml` の `workers_dev` は `false` のままにすること。**
+> 名前が同じなので紛らわしいが、別のものを指している。
+>
+> | | 何か | どうする |
+> |---|---|---|
+> | アカウントの workers.dev サブドメイン | アカウントに 1 つ付く名前。Cron の登録に要る | **発行する** |
+> | `wrangler.toml` の `workers_dev = true` | **この Worker をその URL でも公開する**設定 | **触らない** |
+>
+> Access はゾーンのホスト名にしか掛からないので、後者を有効にすると
+> ダッシュボードが認証なしで開く。`preflight` とテストが止めるようにしてある。
+> **サブドメインを発行しても、`workers_dev = false` ならこの Worker は
+> そこに出ない。**
+
 ---
 
 ## A7. ドメインで開けることを確認する

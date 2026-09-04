@@ -185,6 +185,11 @@ Cloudflare Access はゾーンのホスト名に紐づくので、`*.workers.dev
 認証なしに開く。`site.ts` も想定外のホストには 404 を返すが、
 そもそも口を開けないのが本筋。
 
+**ただし「アカウントの workers.dev サブドメイン」は別物で、こちらは要る。**
+アカウントに 1 つ付く名前のことで、Cron の登録 API がその存在を前提にしている。
+発行しても `workers_dev = false` ならこの Worker がそこに出ることはない。
+→ 「Cron だけ登録されない」を見る。
+
 ### 公開の書き込み口を守る
 
 `POST /api/waitlist` は認証なしで受ける唯一の書き込み口。
@@ -360,6 +365,21 @@ CSV は Excel で開ける形（UTF-8 BOM 付き）にしてあり、
 - DNS レコードがプロキシ無効（灰色雲）→ オレンジ雲にする
 - ホスト名の綴りが `[env.production.vars]` と `[[env.production.routes]]` で
   食い違っている → `npm test` が検出する
+
+### Cron だけ登録されない
+
+デプロイは**ルート → Cron の順**に進むので、Cron だけ失敗すると
+`Trigger configuration ... was only partially updated` になる。
+**ルートは張られている**（ドメインは開く）が、定期実行が動かない。
+
+| メッセージ | 原因 | 直し方 |
+|---|---|---|
+| `invalid cron string [code: 10100]` | 曜日に `0` を書いた | `preflight` が止める。`wrangler.toml` の `crons` を直す |
+| `You need a workers.dev subdomain … [code: 10063]` | **アカウントの** workers.dev サブドメインが未発行 | `dash.cloudflare.com` → Compute (Workers) を一度開く |
+
+10063 は `wrangler.toml` の `workers_dev` とは無関係。**`false` のままでよい**
+（→「workers.dev を有効にしないこと」）。どちらも直したあと
+`npm run deploy` をやり直せば揃う。
 
 ### 先行登録が保存されない
 

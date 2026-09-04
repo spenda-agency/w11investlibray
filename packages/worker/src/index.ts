@@ -1,5 +1,5 @@
 import type { Env } from './types.js';
-import { authenticate, isMemberSignupEnabled } from './auth.js';
+import { authenticate, isMemberSignupEnabled, isUnprotectedProduction } from './auth.js';
 import { resolveSite } from './site.js';
 import { handleLpRequest } from './routes/lp.js';
 import { handleHealth, handleRanking, handleRunPipeline, handleSymbol, json } from './routes/api.js';
@@ -113,8 +113,25 @@ async function route(
 
     // 集めた先行登録。**アプリ側（Access の後ろ）にだけ置く。**
     // メールアドレスは個人情報なので、LP 側から到達させない。
-    if (path === '/waitlist') return await handleWaitlistPage(env);
-    if (path === '/api/waitlist.csv') return await handleWaitlistCsv(env, url);
+    //
+    // **さらに、Access が実際に掛かるまでは返さない。** ホストを分けても、
+    // Access 未設定の間は authenticate() が素通しするので、
+    // アプリ側のホスト名さえ知っていれば誰でも CSV を落とせてしまう。
+    // 市場データと違い、メールアドレスは漏れたら取り消せない。
+    if (path === '/waitlist' || path === '/api/waitlist.csv') {
+      if (isUnprotectedProduction(env)) {
+        return json(
+          {
+            error: 'Cloudflare Access が未設定のため停止中',
+            hint: 'docs/GO-LIVE.md の B5・B6。設定すればこの画面は開く',
+          },
+          503,
+        );
+      }
+      return path === '/waitlist'
+        ? await handleWaitlistPage(env)
+        : await handleWaitlistCsv(env, url);
+    }
 
     const symbolApiMatch = /^\/api\/symbol\/(.+)$/.exec(path);
     if (symbolApiMatch?.[1] !== undefined) {

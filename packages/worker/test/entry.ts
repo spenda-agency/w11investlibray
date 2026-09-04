@@ -20,7 +20,11 @@ export { sparkline } from '../src/ui/sparkline.js';
 export { escapeHtml, num, price, pct, verdictLabel } from '../src/ui/format.js';
 export { layout } from '../src/ui/layout.js';
 export { dashboardPage, rankingTable, symbolPage } from '../src/ui/pages.js';
-export { isAccessConfigured, isMemberSignupEnabled } from '../src/auth.js';
+export {
+  isAccessConfigured,
+  isMemberSignupEnabled,
+  isUnprotectedProduction,
+} from '../src/auth.js';
 export { resolveSite, normalisePath, lpBasePath, appUrl } from '../src/site.js';
 export { normaliseEmail } from '../src/routes/waitlist.js';
 export { lpPage } from '../src/ui/lp.js';

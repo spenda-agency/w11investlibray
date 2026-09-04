@@ -117,6 +117,19 @@ Test-Status "先行登録の CSV（404 のはず）" "$LpUrl/api/waitlist.csv"  
 Write-Host ""
 
 Write-Host "[3] ダッシュボードが閉じていること"
+
+# **Access を掛ける前でも、個人情報だけは閉じていること。**
+# Worker 側が Access 未設定を検出して 503 を返す（src/auth.ts）。
+# ここが 200 なら、ホスト名を知っている誰でもメールアドレスを落とせる。
+foreach ($p in @("/waitlist", "/api/waitlist.csv")) {
+    $s = Get-Status "$AppUrl$p"
+    if ($s -eq 200) {
+        Write-Ng $s "**$p が開いている（メールアドレスが漏れる）**"
+    } else {
+        Write-Ok $s "$p は閉じている"
+    }
+}
+
 $appStatus = Get-Status "$AppUrl/"
 if ($appStatus -ge 301 -and $appStatus -le 308) {
     Write-Ok $appStatus "Cloudflare Access のログインへ飛んでいる"

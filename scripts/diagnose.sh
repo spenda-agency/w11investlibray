@@ -91,6 +91,18 @@ expect '先行登録の CSV（404 のはず）' "${LP_URL}/api/waitlist.csv" '40
 echo
 
 echo '[3] ダッシュボードが閉じていること'
+
+# **Access を掛ける前でも、個人情報だけは閉じていること。**
+# Worker 側が Access 未設定を検出して 503 を返す（src/auth.ts）。
+# ここが 200 なら、ホスト名を知っている誰でもメールアドレスを落とせる。
+for p in '/waitlist' '/api/waitlist.csv'; do
+  s=$(status_of "${APP_URL}${p}")
+  case "${s}" in
+    200) ng   "${s}" "**${p} が開いている（メールアドレスが漏れる）**" ;;
+    *)   ok   "${s}" "${p} は閉じている" ;;
+  esac
+done
+
 app_status=$(status_of "${APP_URL}/")
 case "${app_status}" in
   30[123578]) ok  "${app_status}" 'Cloudflare Access のログインへ飛んでいる' ;;

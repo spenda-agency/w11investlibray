@@ -32,6 +32,29 @@ export function isAccessConfigured(env: Env): boolean {
   return env.CF_ACCESS_TEAM_DOMAIN.trim() !== '' && env.CF_ACCESS_AUD.trim() !== '';
 }
 
+/**
+ * **本番のホスト名は入っているのに Access が未設定** = 誰でも開ける公開状態。
+ *
+ * `authenticate()` は未設定なら通す作りにしてある（ローカル開発のため）。
+ * その結果、デプロイ後・Access 設定前の期間だけ、
+ * アプリ側がまるごと素通しになる。GO-LIVE.md は Access（B5）を
+ * 手動パイプライン（B4）の後に置いているので、**この期間は必ず生じる。**
+ *
+ * 市場データはその間 0 件なので実害が無いが、
+ * **先行登録のメールアドレスは別**。漏れたら取り返しがつかないので、
+ * 個人情報を返す経路だけはこの判定で止める（index.ts）。
+ *
+ * ローカルの `wrangler dev` は既定環境を使い、ホスト名は
+ * `[env.production]` にしか無いので、ここは常に false になる。
+ * 判定の条件は `site.ts` の `resolveSite`（「どちらかが設定されている = 本番」）
+ * と揃えてある。**片方ずらすと、塞いだつもりの穴が開く。**
+ */
+export function isUnprotectedProduction(env: Env): boolean {
+  const hostsConfigured =
+    (env.APP_HOSTNAME || '').trim() !== '' || (env.LP_HOSTNAME || '').trim() !== '';
+  return hostsConfigured && !isAccessConfigured(env);
+}
+
 export function isMemberSignupEnabled(env: Env): boolean {
   return env.MEMBER_SIGNUP_ENABLED === 'true';
 }

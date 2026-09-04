@@ -45,12 +45,61 @@ test('Access が有効なら認証なしでは見られない', async () => {
   }
 });
 
+test('Access 未設定の本番では、アプリ側でも返さない', async () => {
+  // **デプロイ後・Access 設定前は必ず生じる期間**（GO-LIVE.md は B5 を
+  // B4 の後に置いている）。authenticate() はこの間 素通しするので、
+  // アプリ側のホスト名を知っているだけで CSV が落とせてしまう。
+  // 市場データと違い、メールアドレスは漏れたら取り消せない。
+  const env = makeEnv(HOSTS); // ホスト名あり・CF_ACCESS_* は空
+  await addSignups(env, ['leak@example.com']);
+  for (const path of ['/waitlist', '/api/waitlist.csv']) {
+    const res = await handler.fetch(req(`https://app.invest.example${path}`), env, ctx);
+    assert.equal(res.status, 503, path);
+    assert.ok(!(await res.text()).includes('leak@example.com'), `${path} からメールが漏れている`);
+  }
+});
+
+test('片方のホスト名だけでも本番として扱う', async () => {
+  // site.ts の resolveSite が「どちらかが設定されている = 本番」で
+  // 判定しているのと揃える。**片方ずらすと塞いだつもりの穴が開く。**
+  const env = makeEnv({ LP_HOSTNAME: '', APP_HOSTNAME: 'app.invest.example' });
+  const res = await handler.fetch(req('https://app.invest.example/api/waitlist.csv'), env, ctx);
+  assert.equal(res.status, 503);
+});
+
+test('手動パイプラインは塞がない', async () => {
+  // **B4 はこれを叩く。** ここまで塞ぐと初回実行の手段が消える。
+  // 個人情報を返さないので、Access より前に開けておいてよい。
+  // API キーを空にして、handleRunPipeline が中身に進む前に 400 で返るようにする。
+  // **ここで通してしまうと J-Quants へ実際に取りに行く**（npm test は
+  // ネットワーク不要にしてある）。見たいのは「503 で門前払いされないこと」だけ。
+  const env = makeEnv({ ...HOSTS, JQUANTS_API_KEY: '' });
+  const res = await handler.fetch(
+    req('https://app.invest.example/api/run-pipeline', { method: 'POST' }),
+    env,
+    ctx,
+  );
+  assert.equal(res.status, 400, '手動実行まで塞いでいる');
+});
+
+test('ローカル開発は塞がない', async () => {
+  // ホスト名未設定 = まだ本番ではない。ここを塞ぐと wrangler dev で
+  // 画面を確認できなくなる。
+  const env = makeEnv();
+  const res = await handler.fetch(req('http://localhost:8787/waitlist'), env, ctx);
+  assert.equal(res.status, 200);
+});
+
 // ---- 画面 -------------------------------------------------------------------
+//
+// **ここから下はローカル構成（ホスト名なし）で確かめる。**
+// 閲覧できる構成は「ローカル」か「Access 済み + 有効な JWT」の 2 つしかなく、
+// 後者はテストで JWT を組む必要がある。画面と CSV の中身はホストに依存しない。
 
 test('一覧が新しい順に出る', async () => {
-  const env = makeEnv(HOSTS);
+  const env = makeEnv();
   await addSignups(env, ['old@example.com', 'mid@example.com', 'new@example.com']);
-  const html = await (await handler.fetch(req('https://app.invest.example/waitlist'), env, ctx)).text();
+  const html = await (await handler.fetch(req('http://localhost:8787/waitlist'), env, ctx)).text();
 
   assert.match(html, /先行登録/);
   assert.match(html, /3 件/);
@@ -60,24 +109,24 @@ test('一覧が新しい順に出る', async () => {
 });
 
 test('登録が無ければ空の表ではなく案内を出す', async () => {
-  const env = makeEnv(HOSTS);
-  const html = await (await handler.fetch(req('https://app.invest.example/waitlist'), env, ctx)).text();
+  const env = makeEnv();
+  const html = await (await handler.fetch(req('http://localhost:8787/waitlist'), env, ctx)).text();
   assert.match(html, /まだ登録がありません/);
 });
 
 test('個人情報の扱いに触れる注意書きを出す', async () => {
-  const env = makeEnv(HOSTS);
+  const env = makeEnv();
   await addSignups(env, ['c@example.com']);
-  const html = await (await handler.fetch(req('https://app.invest.example/waitlist'), env, ctx)).text();
+  const html = await (await handler.fetch(req('http://localhost:8787/waitlist'), env, ctx)).text();
   assert.match(html, /個人情報/);
 });
 
 // ---- CSV --------------------------------------------------------------------
 
 test('CSV が添付として返る', async () => {
-  const env = makeEnv(HOSTS);
+  const env = makeEnv();
   await addSignups(env, ['taro@example.com']);
-  const res = await handler.fetch(req('https://app.invest.example/api/waitlist.csv'), env, ctx);
+  const res = await handler.fetch(req('http://localhost:8787/api/waitlist.csv'), env, ctx);
 
   assert.equal(res.status, 200);
   assert.match(res.headers.get('content-type'), /text\/csv/);
@@ -109,22 +158,22 @@ test('CSV のクォートを二重化する', () => {
 });
 
 test('危険な値を含む登録が CSV で無害化される', async () => {
-  const env = makeEnv(HOSTS);
+  const env = makeEnv();
   await env.INVEST_DB.prepare(
     `INSERT INTO waitlist (email, created_at, consented_at, source, status)
      VALUES ('=cmd|calc!a1@evil.example', '2026-08-27T00:00:00.000Z', '2026-08-27T00:00:00.000Z', 'lp', 'pending')`,
   ).run();
-  const body = await (await handler.fetch(req('https://app.invest.example/api/waitlist.csv'), env, ctx)).text();
+  const body = await (await handler.fetch(req('http://localhost:8787/api/waitlist.csv'), env, ctx)).text();
   assert.match(body, /"'=cmd\|calc!a1@evil\.example"/, '先頭に \' が付いていない');
 });
 
 test('CSV の limit は範囲内に丸める', async () => {
-  const env = makeEnv(HOSTS);
+  const env = makeEnv();
   await addSignups(env, ['a@example.com', 'b@example.com']);
   for (const q of ['limit=1', 'limit=99999', 'limit=-5', 'limit=abc']) {
-    const res = await handler.fetch(req(`https://app.invest.example/api/waitlist.csv?${q}`), env, ctx);
+    const res = await handler.fetch(req(`http://localhost:8787/api/waitlist.csv?${q}`), env, ctx);
     assert.equal(res.status, 200, q);
   }
-  const one = await (await handler.fetch(req('https://app.invest.example/api/waitlist.csv?limit=1'), env, ctx)).text();
+  const one = await (await handler.fetch(req('http://localhost:8787/api/waitlist.csv?limit=1'), env, ctx)).text();
   assert.equal(one.trim().split('\r\n').length, 2, '見出し + 1 行');
 });

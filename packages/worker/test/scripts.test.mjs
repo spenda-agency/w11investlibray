@@ -233,3 +233,47 @@ test('diagnose の [4] が /api/health の実際の本文で分岐する', async
     assert.ok(text.includes('"lastSuccessDate":null'), `${name} の分岐が本文の形と違う`);
   }
 });
+
+// ---- ルートの npm script（cd を要らなくするための入口） ---------------------
+
+test('diagnose の URL を wrangler.toml から組み立てる', async () => {
+  // **手で $env:LP_URL を打たせない。** 一度打ち間違えて
+  // 「用語 'LP_URL=…' は認識されません」になった（bash の書き方を PowerShell へ）。
+  // 値は wrangler.toml に既にある。写す作業そのものを無くす。
+  const { buildUrls, readProdVar } = await import('../../../scripts/diagnose.mjs');
+  const config = readFileSync(
+    fileURLToPath(new URL('../wrangler.toml', import.meta.url)),
+    'utf8',
+  );
+
+  const urls = buildUrls(config, {});
+  assert.equal(urls.LP_URL, 'https://goldencross-incomegains.com');
+  assert.equal(urls.APP_URL, 'https://app.goldencross-incomegains.com');
+
+  // 環境変数が渡されていればそちらが勝つ（ローカルや検証環境を見るため）
+  const overridden = buildUrls(config, { LP_URL: 'http://localhost:8787/lp' });
+  assert.equal(overridden.LP_URL, 'http://localhost:8787/lp');
+  assert.equal(overridden.APP_URL, 'https://app.goldencross-incomegains.com');
+
+  // **既定側の同名キーを拾わないこと。** [env.production.vars] だけを見る。
+  assert.equal(readProdVar(config, 'CF_ACCESS_AUD'), '', '空の値は空で返す');
+  assert.equal(readProdVar(config, 'NO_SUCH_KEY'), '');
+});
+
+test('ルートから cd 無しで診断と一覧が打てる', () => {
+  // 同じ失敗を 5 回踏んだ: リポジトリの外・packages\worker の中・その中でもう一度 cd。
+  // どれも「打つ場所」の問題だったので、打つ場所を 1 つに畳んだ。
+  const root = JSON.parse(
+    readFileSync(fileURLToPath(new URL('../../../package.json', import.meta.url)), 'utf8'),
+  );
+  assert.ok(root.scripts['diagnose'], 'ルートに diagnose が無い');
+  assert.ok(root.scripts['waitlist'], 'ルートに waitlist が無い');
+
+  const worker = JSON.parse(
+    readFileSync(fileURLToPath(new URL('../package.json', import.meta.url)), 'utf8'),
+  );
+  // **--env production を落とさないこと。** 落とすと既定の Worker の
+  // D1 を見に行って「0 件」に見える。このリポジトリで一番ハマるところ。
+  assert.match(worker.scripts['waitlist'], /--env production/);
+  assert.match(worker.scripts['waitlist'], /--remote/);
+});

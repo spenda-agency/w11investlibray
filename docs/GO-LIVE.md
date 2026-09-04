@@ -337,25 +337,24 @@ dash.cloudflare.com → 左メニュー Compute (Workers)
 DNS の A レコードは設定済みのはず（`@` と `app`、どちらも
 IPv4 `192.0.2.1`、**プロキシ オン**）。まだなら `DEPLOY.md` の手順 5 を見る。
 
-**まとめて見るならこれ 1 本。** Windows はこちら。
+**まとめて見るならこれ 1 本。** Windows でも bash でも同じ。
 
-```powershell
-$env:LP_URL="https://goldencross-incomegains.com"
-$env:APP_URL="https://app.goldencross-incomegains.com"
-.\scripts\diagnose.ps1
+```
+npm run diagnose
 ```
 
-bash なら:
+URL は `wrangler.toml` の `LP_HOSTNAME` / `APP_HOSTNAME` から組む。
+OS を見て `.ps1` と `.sh` を選ぶ。**`cd` も環境変数の設定も要らない。**
 
-```bash
-LP_URL=https://goldencross-incomegains.com \
-APP_URL=https://app.goldencross-incomegains.com \
-  ./scripts/diagnose.sh
-```
-
-> **`LP_URL=… ` の形は PowerShell では動かない**（`用語 'LP_URL=…' は認識されません`）。
-> PowerShell の環境変数は `$env:名前="値"` を**先の行で**設定する。
-> 行継続も `\` ではなくバッククォート `` ` ``。
+> 別のホストを見たいときだけ、環境変数で上書きする。
+> **PowerShell では `LP_URL=… コマンド` の形は動かない**
+> （`用語 'LP_URL=…' は認識されません`）。`$env:名前="値"` を**先の行で**置く。
+>
+> ```powershell
+> $env:LP_URL="http://localhost:8787/lp"
+> $env:APP_URL="http://localhost:8787"
+> npm run diagnose
+> ```
 
 疎通だけでなく、**ホストを分けた目的が守れているか**を見る。
 
@@ -463,13 +462,15 @@ Method を絞らないと、無害な GET でも枠を消費して、
 ブラウザで LP を開き、自分のメールアドレスで実際に登録する。
 **同意チェックを入れないと送信できない**ことも確認する（必須にしてある）。
 
-D1 に入ったかを見る:
+D1 に入ったかを見る。**リポジトリの一番上で打つ**（`cd` は要らない）:
 
-```powershell
-cd packages\worker
-npx wrangler d1 execute invest-db --remote --env production --command "SELECT email, consented_at, status FROM waitlist"
-cd ..\..
 ```
+npm run waitlist
+```
+
+> `cd packages\worker` してから `npx wrangler d1 execute …` でも同じだが、
+> **`--env production` を落とすと既定の Worker の D1 を見に行って
+> 「0 件」に見える。** script に畳んであるので、そちらを使う。
 
 | 見るところ | 期待 |
 |---|---|

@@ -17,7 +17,9 @@
     "check:datasource": "npm run check:datasource -w @invest/batch",
     "backfill": "npm run backfill -w @invest/batch",
     "preflight": "node scripts/preflight.mjs",
-    "set:db-id": "node scripts/set-database-id.mjs"
+    "set:db-id": "node scripts/set-database-id.mjs",
+    "diagnose": "node scripts/diagnose.mjs",
+    "waitlist": "npm run waitlist -w @invest/worker"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^5.20260825.1",

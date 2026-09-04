@@ -14,6 +14,7 @@
     "db:migrate:remote": "wrangler d1 execute invest-db --remote --env production --file=../../migrations/0001_init.sql && wrangler d1 execute invest-db --remote --env production --file=../../migrations/0002_waitlist.sql",
     "db:seed:local": "wrangler d1 execute invest-db --local --file=./seed/sample.sql",
     "deploy:dry": "wrangler deploy --env production --dry-run",
+    "waitlist": "wrangler d1 execute invest-db --remote --env production --command \"SELECT email, created_at, consented_at, status FROM waitlist ORDER BY created_at DESC\"",
     "preflight": "node ../../scripts/preflight.mjs"
   },
   "dependencies": {

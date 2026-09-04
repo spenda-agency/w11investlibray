@@ -69,6 +69,29 @@ else
   skip "${sitemap_status}" 'sitemap.xml — ローカルでは 404 が正しい'
 fi
 
+# **先行登録の受け口が edge で塞がれていないこと。**
+# LP の唯一の目的がここなのに、塞がっていても画面は正常に出る。
+# 気付くのは「登録が 1 件も入らない」と分かってからで、
+# それまでに来た人はブロックページを見て帰る。実際 WAF の設定を
+# 取り違えて（レート制限のつもりがカスタムルール）1 回目から
+# 全部ブロックしていたことがある。
+#
+# **GET で叩く。** POST すると本番の D1 にゴミが入る。
+# Worker まで届いていれば 405（POST で送信すること）が返るので、
+# 入口が生きていることはそれで分かる。
+# なおレート制限を入れてあると、この 1 回が持ち分を消費する
+# （5 回 / 10 分）。短時間に何度も走らせると自分が 429 に当たる。
+signup_status=$(status_of "${LP_URL}/api/waitlist")
+case "${signup_status}" in
+  405) ok "${signup_status}" '先行登録の受け口が開いている' ;;
+  403) ng "${signup_status}" '**先行登録の受け口が WAF に塞がれている**'
+       echo '            → カスタムルールで /api/waitlist をブロックしていないか。'
+       echo '              レート制限は「レート制限ルール」で作る（docs/GO-LIVE.md の A8）' ;;
+  429) ng "${signup_status}" 'レート制限に当たっている（10 分待って再実行）' ;;
+  404) ng "${signup_status}" '受け口が無い。LP 側のルーティングを確認する' ;;
+  *)   ng "${signup_status}" '先行登録の受け口が想定外（期待 405）' ;;
+esac
+
 csp=$(curl -sSI --max-time 15 "${LP_URL}/" 2>/dev/null | tr -d '\r' | grep -i '^content-security-policy:' || true)
 if [[ -z "${csp}" ]]; then
   echo '  NG   CSP ヘッダが無い'

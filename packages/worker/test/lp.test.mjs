@@ -274,6 +274,9 @@ test('JSON でも受け付ける', async () => {
 });
 
 test('GET では登録できない', async () => {
+  // **この 405 は diagnose も当てにしている。** 本番で GET を叩き、
+  // 405 なら「受け口が Worker まで届いている」、403 なら「WAF が塞いでいる」
+  // と切り分ける（scripts/diagnose.sh の [1]）。**変えるなら両方直すこと。**
   const env = makeEnv(HOSTS);
   const res = await handler.fetch(req('https://invest.example/api/waitlist'), env, ctx);
   assert.equal(res.status, 405);

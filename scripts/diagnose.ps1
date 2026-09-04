@@ -86,6 +86,33 @@ if ($mode -eq "prod") {
     Write-Skip $sitemapStatus "sitemap.xml — ローカルでは 404 が正しい"
 }
 
+# **先行登録の受け口が edge で塞がれていないこと。**
+# LP の唯一の目的がここなのに、塞がっていても画面は正常に出る。
+# 気付くのは「登録が 1 件も入らない」と分かってからで、
+# それまでに来た人はブロックページを見て帰る。実際 WAF の設定を
+# 取り違えて（レート制限のつもりがカスタムルール）1 回目から
+# 全部ブロックしていたことがある。
+#
+# **GET で叩く。** POST すると本番の D1 にゴミが入る。
+# Worker まで届いていれば 405（POST で送信すること）が返るので、
+# 入口が生きていることはそれで分かる。
+# なおレート制限を入れてあると、この 1 回が持ち分を消費する
+# （5 回 / 10 分）。短時間に何度も走らせると自分が 429 に当たる。
+$signupStatus = Get-Status "$LpUrl/api/waitlist"
+if ($signupStatus -eq 405) {
+    Write-Ok $signupStatus "先行登録の受け口が開いている"
+} elseif ($signupStatus -eq 403) {
+    Write-Ng $signupStatus "**先行登録の受け口が WAF に塞がれている**"
+    Write-Host "            → カスタムルールで /api/waitlist をブロックしていないか。"
+    Write-Host "              レート制限は「レート制限ルール」で作る（docs/GO-LIVE.md の A8）"
+} elseif ($signupStatus -eq 429) {
+    Write-Ng $signupStatus "レート制限に当たっている（10 分待って再実行）"
+} elseif ($signupStatus -eq 404) {
+    Write-Ng $signupStatus "受け口が無い。LP 側のルーティングを確認する"
+} else {
+    Write-Ng $signupStatus "先行登録の受け口が想定外（期待 405）"
+}
+
 $csp = $null
 try {
     $head = Invoke-WebRequest -Uri "$LpUrl/" -Method GET -TimeoutSec 15 `

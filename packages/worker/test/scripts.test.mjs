@@ -164,6 +164,16 @@ test('diagnose.sh と .ps1 が同じ経路を検査している', () => {
     assert.match(text, /local/, `${name} にモード判定が無い`);
     assert.match(text, /503/, `${name} が /api/health の 503 を許していない`);
   }
+
+  // **登録の受け口の検査。** `/api/waitlist` は `/api/waitlist.csv` の
+  // 部分文字列なので、上の paths に足しても何も証明しない。
+  // 判定そのものが 2 版に入っていることを見る。
+  for (const [name, text] of [['diagnose.sh', sh], ['diagnose.ps1', ps]]) {
+    assert.ok(text.includes('先行登録の受け口'), `${name} が登録の受け口を見ていない`);
+    assert.match(text, /405/, `${name} が 405 を期待していない`);
+    assert.match(text, /403/, `${name} が WAF ブロック（403）を切り分けていない`);
+    assert.match(text, /429/, `${name} がレート制限（429）を切り分けていない`);
+  }
 });
 
 test('diagnose.ps1 は PowerShell 7 専用の引数を使わない', () => {

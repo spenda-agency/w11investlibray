@@ -68,6 +68,14 @@ Cron（平日 19:30）は HTTP のエッジを通らず Worker を直接起動�
 > **どのコマンドも、リポジトリの中で打つ。**
 > `npm run …` はカレントディレクトリの `package.json` を見るので、
 > 外で打つと `npm error ENOENT … package.json` で全部落ちる。
+>
+> **コード枠は行ごとに貼る。** この文書のコード枠には説明を混ぜていないが、
+> チャットなどからコピーするときは行末の `#` に注意する——
+> **zsh は対話中 `#` をコメントとして扱わない**（既定で
+> `INTERACTIVE_COMMENTS` が無効）。`npm run waitlist  # 説明` を貼ると
+> `Unknown arguments: #, 説明` になる。
+>
+> **`…に本物のキー` のような穴埋めは、必ず置き換えてから実行する。**
 
 ---
 
@@ -78,7 +86,7 @@ Cron（平日 19:30）は HTTP のエッジを通らず Worker を直接起動�
 **ここを飛ばすと A2・A4・A6 がまとめて失敗する。**
 
 ```powershell
-cd ~\Documents                    # 置きたい場所へ
+cd ~\Documents
 git clone https://github.com/spenda-agency/w11investlibray.git
 cd w11investlibray
 npm install
@@ -110,7 +118,7 @@ bash なら `cd ~/Documents` 以降は同じ。
 uuid が分からなくなったら引き直せる:
 
 ```bash
-npx wrangler d1 list          # invest-db の行の uuid
+npx wrangler d1 list
 ```
 
 Cloudflare 側に置いたもの（Secret・D1 のデータ・R2・WAF・Cron）は
@@ -123,7 +131,7 @@ Cloudflare 側に置いたもの（Secret・D1 のデータ・R2・WAF・Cron）
 
 ```powershell
 npx wrangler login
-npx wrangler whoami      # アカウントが合っているか確認
+npx wrangler whoami
 ```
 
 ブラウザが開いて Cloudflare の認証に飛ぶ。許可すると端末に戻る。
@@ -160,7 +168,7 @@ npx wrangler d1 create invest-db | npm run set:db-id
 **作り直さない。既にあるものの id を引く。**
 
 ```powershell
-npx wrangler d1 list          # invest-db の行の uuid を見る
+npx wrangler d1 list
 npx wrangler d1 info invest-db
 ```
 
@@ -265,7 +273,7 @@ LP は公開した瞬間からメールアドレスを集め始める。
 逃げ道（環境変数で無効化）は作っていない。
 
 ```bash
-grep -rn 'を記入' packages/worker/src/     # 何も出なければ OK
+grep -rn 'を記入' packages/worker/src/
 ```
 
 > **保存期間と解除方法は文案を入れてある。** いまのコードが実際に
@@ -521,8 +529,7 @@ npm run waitlist
 ```bash
 cd packages/worker
 npx wrangler secret put JQUANTS_API_KEY --env production
-# → プロンプトが出るのでキーを貼って Enter
-npx wrangler secret list --env production      # 入ったか確認
+npx wrangler secret list --env production
 cd ../..
 ```
 
@@ -580,13 +587,17 @@ npx wrangler secret list --env production
 `@invest/batch` にあり、ルートが橋渡ししている）。
 
 ```bash
-export JQUANTS_API_KEY="..."        # PowerShell: $env:JQUANTS_API_KEY="..."
+export JQUANTS_API_KEY="ここに本物のキー"
 npm run check:datasource
 ```
 
 > **B1 で登録したのとは別物。** B1 の Secret は Cloudflare 上の Worker が
 > 使うもので、手元の端末からは読めない。このコマンドは手元で走るので、
 > 環境変数として渡す必要がある。**同じキーを 2 か所に置くことになる。**
+>
+> `ここに本物のキー` を置き換えること。置き換え忘れると
+> `JQUANTS_API_KEY に使えない文字が入っている` で止まる
+> （キーは HTTP ヘッダーに入るので、全角文字を含められない）。
 
 契約プラン・取得できる期間・遅延・**API が実際に返した項目名**が出る。
 
@@ -795,7 +806,7 @@ npm run deploy
 LP 側が閉じていないことも確認する:
 
 ```bash
-curl -sI https://goldencross-incomegains.com/ | head -1     # 200 のまま
+curl -sI https://goldencross-incomegains.com/ | head -1
 ```
 
 ### 掛けたあとの運用

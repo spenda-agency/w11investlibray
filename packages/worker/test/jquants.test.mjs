@@ -63,6 +63,23 @@ test('APIキーが空ならクライアントを作れない', () => {
   assert.throws(() => new JquantsClient(''), JquantsError);
 });
 
+test('APIキーに ASCII 以外が混じっていたら、何が悪いかを言って止まる', () => {
+  // **キーは HTTP ヘッダーに入る。** 全角が混じったまま fetch に渡すと
+  // `Cannot convert argument to a ByteString because the character at
+  // index 0 has a value of 65288` という、原因の分からないエラーになる。
+  // 65288 は `（`——手順書のプレースホルダをそのまま貼ると踏む。実際に踏んだ。
+  for (const bad of ['（同じキー）', 'abc def', 'abc\n', ' abc', 'キー']) {
+    assert.throws(
+      () => new JquantsClient(bad),
+      (err) => err instanceof JquantsError && /使えない文字/.test(err.message),
+      JSON.stringify(bad),
+    );
+  }
+
+  // 本物のキーの形（英数と記号）は通る
+  assert.doesNotThrow(() => new JquantsClient('eyJhbGciOiJIUzI1NiJ9.abc-_=+/'));
+});
+
 test('ページングを最後まで辿る', async () => {
   const impl = fakeFetch([
     { daily_quotes: [{ Code: '13010', Close: 100 }], pagination_key: 'p2' },

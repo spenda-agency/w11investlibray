@@ -67,6 +67,19 @@ export class JquantsClient {
     options: JquantsClientOptions = {},
   ) {
     if (!apiKey) throw new JquantsError('JQUANTS_API_KEY が未設定');
+
+    // **キーは HTTP ヘッダーに入る。** ASCII 以外が混じっていると
+    // fetch が `Cannot convert argument to a ByteString` で落ちる——
+    // 何が悪いのか分からないエラーになる。実際、手順書のプレースホルダ
+    // （`（同じキー）`）をそのまま貼って、これを踏んだ。
+    // ここで止めて、何を直せばいいかを言う。
+    if (!/^[\x21-\x7e]+$/.test(apiKey)) {
+      throw new JquantsError(
+        'JQUANTS_API_KEY に使えない文字が入っている（ASCII の印字可能文字だけ）。' +
+          '全角文字・空白・改行が混じっていないか確認すること。' +
+          'プレースホルダを貼ったままになっている可能性が高い',
+      );
+    }
     this.baseUrl = (options.baseUrl ?? JQUANTS_DEFAULT_BASE_URL).replace(/\/+$/, '');
     this.aliases = mergeAliases(FIELD_ALIASES, options.extraAliases ?? {});
     this.doFetch = options.fetchImpl ?? fetch;

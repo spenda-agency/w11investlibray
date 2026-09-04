@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { readdirSync, readFileSync, statSync } from 'node:fs';
+import { readdirSync, readFileSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
 import { applyDatabaseId, extractDatabaseId } from '../../../scripts/set-database-id.mjs';
 import { fileURLToPath } from 'node:url';
 import { join } from 'node:path';
@@ -38,10 +39,36 @@ test('.sh は BOM を持たない（シェバンが壊れる）', () => {
   }
 });
 
-test('.sh は実行権限を持つ', () => {
+test('.sh は実行権限を持つ（git に記録された modeで見る）', () => {
+  // **作業ツリーの権限を見てはいけない。** NTFS は POSIX の実行ビットを
+  // 表現できないので、Windows では statSync が必ず 0 を返して落ちる。
+  // 実際に Windows で落ちた——リポジトリは正しいのに、テストが間違っていた。
+  //
+  // 見るべきは **git が記録している mode**。他の人が checkout したときに
+  // 実行できるかを決めているのはこちらで、これはどの OS でも同じ値が読める。
+  let entries;
+  try {
+    entries = execFileSync('git', ['ls-files', '-s', '--', SCRIPTS_DIR], {
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'ignore'],
+    });
+  } catch {
+    return; // git が無い / checkout でない（tarball 展開など）。ここでは判定しない
+  }
+
+  const modes = new Map();
+  for (const line of entries.split('\n')) {
+    const m = /^(\d{6}) [0-9a-f]+ \d\t(.+)$/.exec(line);
+    if (m !== null) modes.set(m[2].split('/').pop(), m[1]);
+  }
+  assert.ok(modes.size > 0, 'git から scripts/ の mode を読めなかった');
+
   for (const name of files.filter((f) => f.endsWith('.sh'))) {
-    const mode = statSync(join(SCRIPTS_DIR, name)).mode;
-    assert.ok((mode & 0o111) !== 0, `${name} に実行権限が無い`);
+    assert.equal(
+      modes.get(name),
+      '100755',
+      `${name} に実行権限が無い（git update-index --chmod=+x scripts/${name}）`,
+    );
   }
 });
 

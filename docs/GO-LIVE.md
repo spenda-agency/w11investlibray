@@ -369,7 +369,9 @@ OS を見て `.ps1` と `.sh` を選ぶ。**`cd` も環境変数の設定も要�
 「まだ 1 度も成功していない」になる。**どちらも A の時点では正しい**
 （B5 と B4 で解消する）。
 
-手で見るなら:
+手で見るなら（**bash の書き方**。PowerShell では `curl` が
+`Invoke-WebRequest` の別名になり、`grep` も無いので動かない。
+Windows で同じことをするなら `curl.exe -sI … | Select-String 'HTTP/|cf-ray'`）:
 
 ```bash
 curl -sI https://goldencross-incomegains.com/ | grep -iE 'HTTP/|cf-ray'
@@ -606,6 +608,25 @@ Worker で回さないのはこのため（実行時間にも D1 の 1 日あた
 
 ## B4. 日次パイプラインを手で 1 回回す ← **Access より前**
 
+**Windows ではこちら。`.exe` を忘れないこと。**
+
+```powershell
+curl.exe -X POST "https://app.goldencross-incomegains.com/api/run-pipeline"
+```
+
+> **`curl` だけだと落ちる。** PowerShell の `curl` は `Invoke-WebRequest` の
+> 別名で、`-X` という引数を持たない
+> （`パラメーター名 'X' に一致するパラメーターが見つかりません`）。
+> `curl.exe` と書けば本物の curl が呼ばれる（Windows 10 1803 以降に同梱）。
+>
+> PowerShell だけで書くならこう:
+>
+> ```powershell
+> Invoke-RestMethod -Method Post -Uri "https://app.goldencross-incomegains.com/api/run-pipeline"
+> ```
+
+bash なら:
+
 ```bash
 curl -X POST "https://app.goldencross-incomegains.com/api/run-pipeline"
 ```
@@ -615,13 +636,13 @@ curl -X POST "https://app.goldencross-incomegains.com/api/run-pipeline"
 | `?force=1` | 成功済みの日でも走り直す |
 | `?date=YYYY-MM-DD` | 日付を指定する |
 
-確認:
+確認は diagnose に任せる（OS を問わない）:
 
-```bash
-curl -s https://goldencross-incomegains.com/api/health
+```
+npm run diagnose
 ```
 
-`lastSuccessDate` に日付が入り、`status` が `ok` なら通っている。
+`[4]` が `ok 直近の日次処理が成功している` になれば通っている。
 
 ブラウザで `https://app.goldencross-incomegains.com/` を開くと候補が並ぶ。
 **この時点ではまだ誰でも見られる**（画面上部に赤い警告が出ている）。次で閉じる。

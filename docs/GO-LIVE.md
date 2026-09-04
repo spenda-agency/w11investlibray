@@ -96,6 +96,27 @@ bash なら `cd ~/Documents` 以降は同じ。
 **以降のコマンドはすべてこの `w11investlibray` の中で打つ。**
 プロンプトが `PS C:\Users\…\w11investlibray>` になっていることを確かめる。
 
+### 別の PC で続きをやるとき
+
+**2 つだけ、clone しても付いてこないものがある。**
+
+| | なぜ付いてこないか | どうするか |
+|---|---|---|
+| `wrangler` のログイン | 認証情報は PC ごと | `npx wrangler login` |
+| `database_id` | **git に入れていない**（`wrangler.toml` はプレースホルダのまま） | `npm run set:db-id -- <uuid>` |
+
+`database_id` を忘れると、`npm run deploy` が
+`database_id が未設定（プレースホルダのまま）` で止まる。
+uuid が分からなくなったら引き直せる:
+
+```bash
+npx wrangler d1 list          # invest-db の行の uuid
+```
+
+Cloudflare 側に置いたもの（Secret・D1 のデータ・R2・WAF・Cron）は
+アカウントに紐づくので、**PC を変えても消えない。**
+入れ直すのは上の 2 つだけ。
+
 ---
 
 ## A1. wrangler にログインする
@@ -497,13 +518,37 @@ npm run waitlist
 
 ## B1. J-Quants の API キーを Secret に登録する
 
-```powershell
-cd packages\worker
+```bash
+cd packages/worker
 npx wrangler secret put JQUANTS_API_KEY --env production
 # → プロンプトが出るのでキーを貼って Enter
 npx wrangler secret list --env production      # 入ったか確認
-cd ..\..
+cd ../..
 ```
+
+（Windows は `cd packages\worker` … `cd ..\..`）
+
+> ### Windows で `Assertion failed: … src\win\async.c` と出て落ちたら
+>
+> `wrangler secret put` は**対話プロンプトを出す**コマンドで、
+> Windows の一部の端末では libuv がここで落ちる。wrangler のヘルプが
+> 表示されて終わることもある。**登録できていないので、確認すること。**
+>
+> ```bash
+> npx wrangler secret list --env production
+> ```
+>
+> 落ちるなら、**ダッシュボードから入れる。** こちらは OS を問わない。
+>
+> ```
+> dash.cloudflare.com → Workers & Pages → w11-invest-library-production
+>   → Settings → Variables and Secrets → Add
+>   Type: Secret / Name: JQUANTS_API_KEY / Value: （キー）
+>   → Deploy
+> ```
+>
+> **`w11-invest-library-production` を選ぶこと**（`-production` の付かない
+> ほうではない）。理由は下と同じ。
 
 ### **`--env production` を落とさないこと**
 
@@ -530,8 +575,12 @@ npx wrangler secret list --env production
 
 ## B2. 疎通を確認し、プラン情報を記録する
 
-```powershell
-$env:JQUANTS_API_KEY="..."          # bash: export JQUANTS_API_KEY="..."
+**リポジトリの一番上で打つ。** `packages/worker` の中で打つと
+`Missing script: "check:datasource"` になる（このスクリプトは
+`@invest/batch` にあり、ルートが橋渡ししている）。
+
+```bash
+export JQUANTS_API_KEY="..."        # PowerShell: $env:JQUANTS_API_KEY="..."
 npm run check:datasource
 ```
 

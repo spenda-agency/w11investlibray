@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
+  handler,
   runDailyPipeline,
   JOB_NAME,
   latestScoredDate,
@@ -12,6 +13,7 @@ import {
   marketDate,
   addDays,
   isIsoDate,
+  scheduledTargetDate,
 } from '../.build/worker.mjs';
 import { makeEnv } from './helpers/d1.mjs';
 
@@ -430,4 +432,65 @@ test('売買代金が無いソースでも終値 × 出来高で順位付けで�
   }
   const universe = await selectUniverse(db, 'JP', date, 10);
   assert.deepEqual(universe, ['JP.11110', 'JP.22220'], `実測: ${universe.join(',')}`);
+});
+
+// ---- Cron が狙う日付 --------------------------------------------------------
+
+test('本走は当日、朝の回収は前日を狙う', () => {
+  // **ここを取り違えると、回収run が毎朝「まだ場が開いていない日」を取りに行く。**
+  // marketDate をそのまま使っていたときが、まさにそれだった。
+  //
+  //   10:30 UTC 月 → 19:30 JST 月 → 月（本走。当日）
+  //   22:00 UTC 月 → 07:00 JST 火 → 月（回収。前日）
+  const cases = [
+    // [発火した UTC 時刻, 期待する対象日, 説明]
+    ['2026-09-07T10:30:00Z', '2026-09-07', '本走 19:30 JST 月 → 当日の月'],
+    ['2026-09-11T10:30:00Z', '2026-09-11', '本走 19:30 JST 金 → 当日の金'],
+    ['2026-09-07T22:00:00Z', '2026-09-07', '回収 07:00 JST 火 → 前日の月'],
+    ['2026-09-11T22:00:00Z', '2026-09-11', '回収 07:00 JST 土 → 前日の金'],
+  ];
+  for (const [fired, want, why] of cases) {
+    assert.equal(scheduledTargetDate(new Date(fired), 'JP'), want, why);
+  }
+});
+
+test('回収run が狙うのは、必ず本走と同じ日', () => {
+  // 本走（10:30 UTC の日 D）と、その晩の回収（22:00 UTC の同じ日 D）が
+  // **同じ対象日**を指していること。ずれていたら回収になっていない。
+  for (const day of ['2026-09-07', '2026-09-08', '2026-09-09', '2026-09-10', '2026-09-11']) {
+    const main = scheduledTargetDate(new Date(`${day}T10:30:00Z`), 'JP');
+    const retry = scheduledTargetDate(new Date(`${day}T22:00:00Z`), 'JP');
+    assert.equal(retry, main, `${day} の本走と回収で対象日がずれている`);
+  }
+});
+
+test('scheduled は回収の時刻に前日を対象として走る', async () => {
+  // 配線まで見る。index.ts が scheduledTargetDate を通していなければ落ちる。
+  const env = makeEnv();
+  const seen = [];
+  const original = env.INVEST_DB.prepare.bind(env.INVEST_DB);
+  env.INVEST_DB.prepare = (sql) => {
+    const m = /INSERT INTO job_runs/.test(sql);
+    const stmt = original(sql);
+    if (m) {
+      const bind = stmt.bind.bind(stmt);
+      stmt.bind = (...args) => { seen.push(args); return bind(...args); };
+    }
+    return stmt;
+  };
+
+  const waits = [];
+  await handler.scheduled(
+    { scheduledTime: Date.parse('2026-09-07T22:00:00Z') },   // 07:00 JST 火
+    env,
+    { waitUntil: (p) => waits.push(p), passThroughOnException() {} },
+  );
+  await Promise.allSettled(waits);
+
+  // job_runs に積まれた対象日が「前日の月曜」であること
+  assert.ok(seen.length > 0, 'job_runs への書き込みが観測できなかった');
+  assert.ok(
+    seen.some((args) => args.includes('2026-09-07')),
+    `回収run が前日を対象にしていない: ${JSON.stringify(seen)}`,
+  );
 });

@@ -277,6 +277,24 @@ npm run deploy
 **`--env production` が要る**（付け忘れるとルートの無い Worker が上がり、
 ドメインに反応しない）。`npm run deploy` を使っていれば自動で付く。
 
+### Cron が登録されたかを確かめる
+
+デプロイは **ルート → Cron の順**に進む。Cron の登録だけが失敗すると
+`Trigger configuration ... was only partially updated` と出て、
+**ルートは張られたのに定期実行が動かない**という中途半端な状態になる。
+
+```
+dash.cloudflare.com → Workers & Pages → w11-invest-library-production
+  → Settings → Triggers → Cron Triggers
+```
+
+2 本（`30 10 * * 1-5` と `0 22 * * 1-5`）が並んでいること。
+
+> 曜日に `0` を書くと Cloudflare が `invalid cron string [code: 10100]` で
+> 拒否する。`preflight` が先に止めるようにしてあるが、
+> **一度この状態でデプロイすると Cron だけ空のまま残る。**
+> その場合は直して `npm run deploy` をやり直せば揃う。
+
 ---
 
 ## A7. ドメインで開けることを確認する

@@ -35,10 +35,16 @@ binding = "INVEST_R2"
 bucket_name = "invest-snapshots"
 
 [triggers]
-# 19:30 JST（10:30 UTC）に本走。J-Quants の当日データが出揃ったあとを狙う。
-# 07:00 JST（22:00 UTC 前日）に取りこぼしの回収。
+# 19:30 JST（10:30 UTC 月〜金）に本走。J-Quants の当日データが出揃ったあとを狙う。
+# 07:00 JST（22:00 UTC 月〜金 = JST では火〜土の朝）に取りこぼしの回収。
+# 回収run が狙うのは**前日**（scheduledTargetDate）。当日はまだ場が開いていない。
+#
+# **曜日に 0 を書かない。** `0 22 * * 0-4` は Cloudflare に
+# `invalid cron string [code: 10100]` で拒否された（実際に踏んだ）。
+# 1-7 の範囲で書く。`scripts/preflight.mjs` が検査している。
+#
 # **Cron は 1 本にまとめてある。** ステップごとの再実行は job_runs で制御する。
-crons = ["30 10 * * 1-5", "0 22 * * 0-4"]
+crons = ["30 10 * * 1-5", "0 22 * * 1-5"]
 
 [observability]
 enabled = true
@@ -107,7 +113,7 @@ binding = "INVEST_R2"
 bucket_name = "invest-snapshots"
 
 [env.production.triggers]
-crons = ["30 10 * * 1-5", "0 22 * * 0-4"]
+crons = ["30 10 * * 1-5", "0 22 * * 1-5"]
 
 [env.production.observability]
 enabled = true

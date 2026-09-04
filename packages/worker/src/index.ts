@@ -5,6 +5,7 @@ import { handleLpRequest } from './routes/lp.js';
 import { handleHealth, handleRanking, handleRunPipeline, handleSymbol, json } from './routes/api.js';
 import { handleDashboard, handleScreener, handleSymbolPage } from './routes/ui.js';
 import { runDailyPipeline } from './jobs/dailyPipeline.js';
+import { scheduledTargetDate } from './jobs/date.js';
 import { handleWaitlistCsv, handleWaitlistPage } from './routes/waitlistAdmin.js';
 import { withSecurityHeaders } from './headers.js';
 
@@ -31,10 +32,16 @@ export default {
    * 19:30 JST に本走、翌 07:00 JST に取りこぼしの回収。
    * その日が成功済みなら `job_runs` を見てスキップするので、
    * 2 度走っても二重に書かない。
+   *
+   * **狙う日付は `scheduledTargetDate` が決める。** 朝の回収は前日を見る
+   * （当日はまだ場が開いていない）。ここを `marketDate` のままにすると、
+   * 回収run が毎朝、存在しない日のデータを取りに行く。
    */
   async scheduled(event: ScheduledController, env: Env, ctx: ExecutionContext): Promise<void> {
+    const firedAt = new Date(event.scheduledTime);
+    const market = (env.MARKETS || 'JP').split(',')[0]?.trim() || 'JP';
     ctx.waitUntil(
-      runDailyPipeline(env, new Date(event.scheduledTime)).then(
+      runDailyPipeline(env, firedAt, { date: scheduledTargetDate(firedAt, market) }).then(
         (result) => {
           console.log('daily_pipeline', JSON.stringify(result));
         },

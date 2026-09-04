@@ -181,3 +181,45 @@ test('diagnose.ps1 は PowerShell 7 専用の引数を使わない', () => {
   // 5.1 が IE のエンジンに依存しないように
   assert.match(calls, /-UseBasicParsing/);
 });
+
+// ---- diagnose の [4] が /api/health の本文と噛み合っていること ---------------
+
+test('diagnose の [4] が /api/health の実際の本文で分岐する', async () => {
+  // **ここが一度も動いていなかった。** json() は JSON.stringify(…, null, 2) を
+  // 通すので本文は `"status": "ok"`（コロンの後に空白）。diagnose 側は
+  // 空白なしの `"status":"ok"` で突き合わせていて、どの分岐にも当たらず
+  // **正常でも「更新が止まっている」と誤報していた**。
+  //
+  // 片側だけ固定しても再発する。3 つ揃えて初めて繋がる:
+  //   (1) 本文の形  (2) 空白を落とす処理  (3) 突き合わせるパターン
+  const { handler, JOB_NAME } = await import('../.build/worker.mjs');
+  const { makeEnv } = await import('./helpers/d1.mjs');
+  const ctx = { waitUntil() {}, passThroughOnException() {} };
+  const health = async (env) =>
+    (await (await handler.fetch(new Request('http://localhost:8787/api/health'), env, ctx)).text())
+      .replace(/\s/g, '');
+
+  // (1) まだ 1 度も走っていない
+  assert.match(await health(makeEnv()), /"lastSuccessDate":null/);
+
+  // (1) 直近で成功している
+  const ok = makeEnv();
+  const today = new Date().toISOString().slice(0, 10);
+  await ok.INVEST_DB.prepare(
+    `INSERT INTO job_runs (job, target_date, status, started_at, finished_at)
+     VALUES (?1, ?2, 'ok', ?3, ?3)`,
+  )
+    .bind(JOB_NAME, today, `${today}T10:00:00.000Z`)
+    .run();
+  assert.match(await health(ok), /"status":"ok"/);
+
+  // (2)(3) 両版が空白を落としてから、その形で突き合わせていること
+  const sh = readFileSync(join(SCRIPTS_DIR, 'diagnose.sh'), 'utf8');
+  const ps = readFileSync(join(SCRIPTS_DIR, 'diagnose.ps1'), 'utf8');
+  assert.match(sh, /tr -d/, 'diagnose.sh が空白を落としていない');
+  assert.match(ps, /-replace '\\s'/, 'diagnose.ps1 が空白を落としていない');
+  for (const [name, text] of [['diagnose.sh', sh], ['diagnose.ps1', ps]]) {
+    assert.ok(text.includes('"status":"ok"'), `${name} の分岐が本文の形と違う`);
+    assert.ok(text.includes('"lastSuccessDate":null'), `${name} の分岐が本文の形と違う`);
+  }
+});

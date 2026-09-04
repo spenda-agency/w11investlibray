@@ -171,9 +171,16 @@ try {
     }
 }
 Write-Host "  $health"
-if ($health -like '*"status":"ok"*') {
+
+# **本文は整形された JSON**（json() が JSON.stringify(…, null, 2) を通す）。
+# `"status": "ok"` のようにコロンの後に空白が入るので、
+# 空白なしのパターンで突き合わせると**どの分岐にも当たらない**。
+# 実際そうなっていて、正常でも「更新が止まっている」と誤報していた。
+# 表示は整形のまま、判定だけ空白を落として行う。
+$compact = $health -replace '\s', ''
+if ($compact -like '*"status":"ok"*') {
     Write-Host "  ok   直近の日次処理が成功している"
-} elseif ($health -like '*"lastSuccessDate":null*') {
+} elseif ($compact -like '*"lastSuccessDate":null*') {
     Write-Host "  --   日次処理がまだ 1 度も成功していない"
     Write-Host "       → LP だけ公開する段階ならこれで正しい。"
     Write-Host "         ダッシュボードを動かすなら docs/GO-LIVE.md の B3 と B4"

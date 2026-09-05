@@ -7,6 +7,7 @@ import { DEFAULT_BASE_URL } from './jquants.js';
 // テストから使う口。CLI 本体の引数解析やルール解決を、実行せずに確かめられるようにする。
 export { resolveRule, runBacktestCommand } from './commands/backtest.js';
 export { insertStatements, q } from './sql.js';
+export { runCheck, reasonFrom } from './commands/check.js';
 
 /**
  * 重い処理の入口。GitHub Actions から叩く。

@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { readFile, mkdtemp, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { parseArgs, recentWeekday, resolveRule, runBacktestCommand, insertStatements, q } from '../.build/cli.mjs';
+import { parseArgs, recentWeekday, resolveRule, runBacktestCommand, insertStatements, q, runCheck, reasonFrom } from '../.build/cli.mjs';
 
 test('引数の解析 — 値ありとフラグのみを区別する', () => {
   const a = parseArgs(['backfill', '--from', '2026-01-01', '--to', '2026-02-01', '--verbose']);
@@ -141,4 +141,89 @@ test('入力が少なすぎる銘柄は黙って飛ばす', async () => {
   assert.equal(code, 0);
   const sql = await readFile(out, 'utf8');
   assert.ok(!sql.includes('INSERT INTO backtest_trades'), '取引が無ければ trades は書かない');
+});
+
+// ---- check の診断 -----------------------------------------------------------
+//
+// **状態コードだけ見て本文を捨てていた。** Light プランに上げた直後の
+// 全 403 を「契約プランの範囲外」と誤診し、しかも終了コードは 0 だった。
+// /listed/info は最下位のプランでも通るので、全部 403 なら
+// プランの話ではありえない——そこまで言えないと診断の意味がない。
+
+/** console.log を捕まえて、出力と戻り値の両方を見る。 */
+async function captureCheck(responses) {
+  const lines = [];
+  const original = console.log;
+  console.log = (...args) => lines.push(args.join(' '));
+  try {
+    const code = await runCheck('dummy-key', 'https://api.example.test/v2', '2026-09-01',
+      async (path) => responses[path] ?? { status: 500, body: { message: '未定義の経路' } });
+    return { code, out: lines.join('\n') };
+  } finally {
+    console.log = original;
+  }
+}
+
+const ALL_PATHS = [
+  '/listed/info', '/prices/daily_quotes', '/markets/trading_calendar',
+  '/fins/statements', '/fins/announcement',
+];
+
+test('check — API が返した理由をそのまま出す', async () => {
+  // **ここが今回いちばん効く。** 理由が出ていれば一度で分かった。
+  const { out } = await captureCheck(
+    Object.fromEntries(ALL_PATHS.map((p) => [p, {
+      status: 403, body: { message: 'The incoming token is invalid.' },
+    }])),
+  );
+  assert.match(out, /The incoming token is invalid\./);
+});
+
+test('check — 全部 403 なら「プランの範囲外」とは言わない', async () => {
+  const { code, out } = await captureCheck(
+    Object.fromEntries(ALL_PATHS.map((p) => [p, { status: 403, body: { message: 'forbidden' } }])),
+  );
+  assert.match(out, /キーが効いていない可能性が高い/);
+  assert.match(out, /発行し直す/);
+  // 1 本ごとに「（契約プランの範囲外の可能性）」と断定していた行は、もう出さない
+  assert.ok(!out.includes('（契約プランの範囲外の可能性）'), '1 本ごとに断定している');
+  assert.equal(code, 1, '必要な 3 本が取れないのに成功で返している');
+});
+
+test('check — /fins/* だけ 403 なら先へ進んでよい', async () => {
+  const rows = { status: 200, body: { info: [{ Code: '13010', CompanyName: 'テスト' }] } };
+  const { code, out } = await captureCheck({
+    '/listed/info': rows,
+    '/prices/daily_quotes': { status: 200, body: { daily_quotes: [{ Code: '13010', C: 100 }] } },
+    '/markets/trading_calendar': { status: 200, body: { trading_calendar: [{ Date: '2026-09-01' }] } },
+    '/fins/statements': { status: 403, body: { message: 'not in your plan' } },
+    '/fins/announcement': { status: 403, body: { message: 'not in your plan' } },
+  });
+  assert.match(out, /先へ進んでよい/);
+  assert.equal(code, 0, 'Phase 1b の 403 で止めている');
+  // 200 のときの振る舞いは変えていない
+  assert.match(out, /実際の項目名: Code, CompanyName/);
+});
+
+test('check — 必要な 3 本のどれかが落ちたら非 0 で終わる', async () => {
+  const { code, out } = await captureCheck({
+    '/listed/info': { status: 200, body: { info: [] } },
+    '/prices/daily_quotes': { status: 500, body: { message: 'boom' } },
+    '/markets/trading_calendar': { status: 200, body: { trading_calendar: [] } },
+    '/fins/statements': { status: 200, body: { statements: [] } },
+    '/fins/announcement': { status: 200, body: { announcement: [] } },
+  });
+  assert.match(out, /\/prices\/daily_quotes が取れない/);
+  assert.equal(code, 1);
+});
+
+test('reasonFrom — よくある形から 1 行を取り出す', () => {
+  assert.equal(reasonFrom({ message: 'a' }), 'a');
+  assert.equal(reasonFrom({ error: 'b' }), 'b');
+  assert.equal(reasonFrom('生のテキスト'), '生のテキスト');
+  // 見覚えのない形でも、何か出す（黙るより良い）
+  assert.match(reasonFrom({ weird: 1 }), /weird/);
+  assert.equal(reasonFrom(null), '');
+  // 長すぎる本文は切る
+  assert.equal(reasonFrom('x'.repeat(500)).length, 200);
 });

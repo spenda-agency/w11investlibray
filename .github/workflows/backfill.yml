@@ -45,7 +45,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: backfill-${{ inputs.from }}-${{ inputs.to }}
-          path: out/backfill.sql
+          path: out/backfill-*.sql
           retention-days: 14
 
       - name: D1 へ流し込む
@@ -58,6 +58,19 @@ jobs:
         # [[d1_databases]] を見に行く。本番の D1 を指しているのは
         # [[env.production.d1_databases]] のほう（package.json の
         # db:migrate:remote も同じ理由で --env production を付けている）。
-        run: >-
-          npx wrangler d1 execute invest-db --remote --env production
-          --file=../../out/backfill.sql
+        # **必ず連番の順に流す。** market_calendar / symbols の INSERT が
+        # prices_daily より先に来る必要がある（外部キー）。ファイル名は
+        # ゼロ埋めしてあるので sort の順で正しい。
+        # 途中で失敗しても、失敗した番号から手で再開できる
+        # （ON CONFLICT DO NOTHING なので重ねて流しても壊れない）。
+        run: |
+          shopt -s nullglob
+          files=(../../out/backfill-*.sql)
+          if [ ${#files[@]} -eq 0 ]; then
+            echo "::error::out/backfill-*.sql が無い"
+            exit 1
+          fi
+          for f in $(printf '%s\n' "${files[@]}" | sort); do
+            echo "適用: $f"
+            npx wrangler d1 execute invest-db --remote --env production --file="$f"
+          done

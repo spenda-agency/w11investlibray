@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { readFile, mkdtemp, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { parseArgs, recentWeekday, resolveRule, runBacktestCommand, insertStatements, q, runCheck, reasonFrom } from '../.build/cli.mjs';
+import { parseArgs, recentWeekday, resolveRule, runBacktestCommand, insertStatements, q, runCheck, reasonFrom, splitByBytes, chunkPath, DEFAULT_MAX_BYTES } from '../.build/cli.mjs';
 
 test('引数の解析 — 値ありとフラグのみを区別する', () => {
   const a = parseArgs(['backfill', '--from', '2026-01-01', '--to', '2026-02-01', '--verbose']);
@@ -231,4 +231,64 @@ test('reasonFrom — よくある形から 1 行を取り出す', () => {
   assert.equal(reasonFrom(null), '');
   // 長すぎる本文は切る
   assert.equal(reasonFrom('x'.repeat(500)).length, 200);
+});
+
+// ---- backfill の分割 ---------------------------------------------------------
+//
+// **1 ファイルにまとめると流し込めない。** 日足は 1 日約 4,000 行返るので、
+// 2 年で約 200 万行・約 180 MB になる。`wrangler d1 execute --file` に
+// 渡せる大きさではない。容量で切って連番で書く。
+
+test('backfill — 上限を超えたら次のファイルへ移る', () => {
+  const stmts = ['a'.repeat(100), 'b'.repeat(100), 'c'.repeat(100)];
+  const chunks = splitByBytes(stmts, 250);
+  assert.equal(chunks.length, 2, '250 バイトに 101 バイトの文は 2 つまで');
+  assert.deepEqual(chunks[0], [stmts[0], stmts[1]]);
+  assert.deepEqual(chunks[1], [stmts[2]]);
+});
+
+test('backfill — 順序を崩さない（外部キーが順序に依存している）', () => {
+  // market_calendar → symbols → prices_daily の順で流れる必要がある。
+  const stmts = ['-- header', 'INSERT INTO market_calendar …', 'INSERT INTO prices_daily …'];
+  const flat = splitByBytes(stmts, 20).flat();
+  assert.deepEqual(flat, stmts, '分割で並びが変わっている');
+});
+
+test('backfill — 収まるなら 1 ファイル', () => {
+  const chunks = splitByBytes(['x', 'y'], DEFAULT_MAX_BYTES);
+  assert.equal(chunks.length, 1);
+});
+
+test('backfill — 1 文が上限を超えても割らない（SQL が壊れる）', () => {
+  const huge = 'z'.repeat(500);
+  const chunks = splitByBytes([huge], 10);
+  assert.equal(chunks.length, 1);
+  assert.equal(chunks[0][0], huge);
+});
+
+test('backfill — 空なら 0 ファイル', () => {
+  assert.deepEqual(splitByBytes([], 100), []);
+});
+
+test('backfill — ファイル名はゼロ埋めで、sort が適用順になる', () => {
+  // **ここを外すと外部キーで落ちる。** backfill-10.sql が backfill-2.sql の
+  // 前に並ぶと、prices_daily が market_calendar より先に流れる。
+  const names = [1, 2, 10, 11].map((i) => chunkPath('out/backfill.sql', i));
+  assert.deepEqual(names, [
+    'out/backfill-001.sql',
+    'out/backfill-002.sql',
+    'out/backfill-010.sql',
+    'out/backfill-011.sql',
+  ]);
+  assert.deepEqual([...names].sort(), names, 'sort の順が適用順と一致しない');
+
+  // .sql が付いていない接頭辞でも同じ
+  assert.equal(chunkPath('out/backfill', 3), 'out/backfill-003.sql');
+});
+
+test('backfill — マルチバイトをバイト数で数える', () => {
+  // 日本語のコメント行が入る。文字数で数えると上限を超える。
+  const jp = 'あ'.repeat(10); // 30 バイト
+  const chunks = splitByBytes([jp, jp], 40);
+  assert.equal(chunks.length, 2, 'バイト数ではなく文字数で数えている');
 });

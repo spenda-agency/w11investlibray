@@ -8,6 +8,7 @@ import { DEFAULT_BASE_URL } from './jquants.js';
 export { resolveRule, runBacktestCommand } from './commands/backtest.js';
 export { insertStatements, q } from './sql.js';
 export { runCheck, reasonFrom } from './commands/check.js';
+export { splitByBytes, chunkPath, DEFAULT_MAX_BYTES } from './commands/backfill.js';
 
 /**
  * 重い処理の入口。GitHub Actions から叩く。
@@ -24,7 +25,8 @@ const USAGE = `使い方
   backfill                           過去の日足を取得して D1 用の .sql を書き出す
     --from YYYY-MM-DD  (必須)
     --to   YYYY-MM-DD  (必須)
-    --out  path                      既定 out/backfill.sql
+    --out  path                      既定 out/backfill.sql（接頭辞。-001.sql から連番で書く）
+    --max-bytes n                    1 ファイルの上限。既定 5242880（5 MB）
     --delay ms                       リクエスト間隔。既定 200
 
   backtest                           ルールを過去データで検証する
@@ -100,6 +102,7 @@ async function main(): Promise<number> {
         from,
         to,
         out: flags['out'] ?? 'out/backfill.sql',
+        ...(flags['max-bytes'] === undefined ? {} : { maxBytes: Number(flags['max-bytes']) }),
         delayMs: Number(flags['delay'] ?? '200'),
       });
     }

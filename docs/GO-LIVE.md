@@ -648,7 +648,25 @@ npm run check:datasource
 ## B3. 過去データを入れる（バックフィル）
 
 日次パイプラインは「今日の 1 日ぶん」しか取らない。
-指標には過去 300 営業日が要るので、**最初に 1 度だけ**まとめて入れる。
+指標が意味を持つには過去のぶんが要るので、**最初に 1 度だけ**まとめて入れる。
+
+### どこまで遡るか
+
+Light プランは **2021-09-05 以降**が取れる（`docs/DATA-SOURCES.md` §1）。
+**推奨は 2 年**（`from` `2024-09-02` / `to` `2026-09-04`）。
+
+| | |
+|---|---|
+| スコアが出る条件 | 30 営業日（`dailyPipeline.ts:139`）。**1 年でも足りる** |
+| 指標の質 | `LOOKBACK_BARS = 300`。300 本あれば 200 日線まで意味を持つ |
+| バックテスト | 取引 30 回未満だと統計として結論を出せない。長いほど楽 |
+
+**1 年（`from` `2025-09-02`）でも動く。** 時間や容量を惜しむならそれでよく、
+**あとから古い期間を足せる**（`ON CONFLICT DO NOTHING` なので重ねても壊れない）。
+
+範囲外の日付を指定すると **HTTP 400** で
+`Your subscription covers the following dates: 2021-09-05 ~` が返る。
+403（経路違い・権限）とは別物。
 
 ### GitHub Actions で回す（推奨）
 
@@ -668,26 +686,48 @@ Actions タブ → 左の一覧から **「バックフィル」** → Run workf
 | `to` | 終了日（前営業日でよい） |
 | `apply` | **チェックを入れる** ← 既定は off。入れないと SQL を作るだけで D1 に流れない |
 
-`apply` を off のまま回すと、生成された `backfill.sql` が Artifacts に
-上がるだけで終わる。**中身を先に見たいとき**はそれでよく、確認したうえで
-もう一度 on で回す、という使い方ができる。
+`apply` を off のまま回すと、生成された `backfill-*.sql` が Artifacts に
+上がるだけで終わる。**初回は off で回して、ファイルの数と大きさを見ること。**
+確認したうえで on にして回し直す。
+
+### 出力は連番のファイルに分かれる
+
+日足は 1 日あたり約 4,000 行（全銘柄）返る。2 年で約 200 万行・約 170 MB。
+**1 ファイルでは `wrangler d1 execute --file` に渡せない**ので、
+5 MB ずつ `out/backfill-001.sql` … と分けて書く（2 年で 34 本ほど）。
+
+**適用は必ず連番の順。** `market_calendar` の INSERT が `prices_daily` より
+先に来る必要がある（外部キー）。ワークフローは `sort` して順に流すので、
+Actions から回すぶんには意識しなくてよい。
+
+**時間がかかる。** 取得が 2 年で約 490 リクエスト、適用が 34 ファイル。
+Actions で 1 時間ほど見ておく。**途中で失敗しても、失敗した番号から
+再開してよい**（重ねて流しても壊れない）。
 
 ### 手元で回す
 
-```powershell
-$env:JQUANTS_API_KEY="..."
-npm run backfill -- --from 2024-01-01 --to 2026-08-27 --out out/backfill.sql
-cd packages\worker
-npx wrangler d1 execute invest-db --remote --env production --file=../../out/backfill.sql
-cd ..\..
+```bash
+export JQUANTS_API_KEY=本物のキー
+npm run backfill -- --from 2024-09-02 --to 2026-09-04
+```
+
+書き出したファイルの一覧と、流し込むコマンドが最後に表示される。
+**連番の順に流すこと:**
+
+```bash
+cd packages/worker
+for f in $(ls ../../out/backfill-*.sql | sort); do
+  echo "適用: $f"
+  npx wrangler d1 execute invest-db --remote --env production --file="$f"
+done
+cd ../..
 ```
 
 ここでも **`--env production` が要る**（B1 と同じ理由。付けないと既定の
 `[[d1_databases]]` を見に行く）。
 
-**時間がかかる。** 500 銘柄 × 数年で 100 万行規模になる。
-Worker で回さないのはこのため（実行時間にも D1 の 1 日あたりの
-書き込み上限にも収まらない）。
+**Worker で回さない理由**は、行数と実行時間の両方。2 年で約 200 万行、
+取得だけで約 490 リクエストになる。
 
 ---
 

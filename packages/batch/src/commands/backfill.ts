@@ -8,11 +8,62 @@ import { insertStatements } from '../sql.js';
  * 過去の日足をまとめて取得し、D1 へ流し込む .sql を書き出す。
  *
  * **これを Worker でやらない理由**は 2 つ。
- *   1. 500 銘柄 × 10 年 ≒ 122 万行。D1 の無料枠（10 万行/日）では 2 週間かかる
- *   2. 取得だけで約 2,450 リクエスト。Worker の実行時間に収まらない
+ *   1. 行数が多い。日足は 1 日あたり約 4,000 行（全銘柄）返るので、
+ *      2 年で約 200 万行になる。Worker の D1 書き込みでは捌けない
+ *   2. 取得だけで営業日の数だけリクエストが要る（2 年で約 490 回）
  * GitHub Actions で回して結果だけ流し込むほうが速く、途中で失敗しても
- * 日付を指定して続きから再開できる。
+ * 続きから再開できる。
+ *
+ * **出力は容量で分割する。** 2 年ぶんを 1 ファイルにすると約 180 MB になり、
+ * `wrangler d1 execute --file` に渡せない。`--out` は接頭辞として扱い、
+ * `backfill-001.sql`, `backfill-002.sql`, … と連番で書き出す。
+ *
+ * **適用は必ず連番の順。** `market_calendar` と `symbols` の INSERT が
+ * `prices_daily` より先に来る必要がある（外部キー）。番号はゼロ埋めして
+ * あるので、`ls | sort` の順で正しい。
+ *
+ * **銘柄は絞らない。** 「今日の出来高上位 N 本」に絞ると、過去に上位だった
+ * 銘柄が落ちて選択バイアスが入る（CLAUDE.md の Point-in-Time）。
+ * D1 の容量に対して 200 万行は問題にならない。困るのは 1 ファイルの
+ * 大きさだけなので、そこだけ直してある。
  */
+
+/** 1 ファイルの上限。D1 の取り込みに余裕を持たせた値。 */
+export const DEFAULT_MAX_BYTES = 5 * 1024 * 1024;
+
+/**
+ * 連番のファイル名を作る。**ゼロ埋めする。**
+ * `backfill-10.sql` が `backfill-2.sql` より前に並ぶと、
+ * prices_daily が market_calendar より先に流れて外部キーで落ちる。
+ */
+export function chunkPath(prefix: string, index: number): string {
+  const base = prefix.replace(/\.sql$/, '');
+  return `${base}-${String(index).padStart(3, '0')}.sql`;
+}
+
+/**
+ * 文の並びを、容量の上限で切り分ける。**順序は保つ。**
+ *
+ * 1 つの文が上限を超えていても分割しない（SQL として壊れる）。
+ * その場合はその文だけで 1 ファイルになる。
+ */
+export function splitByBytes(statements: readonly string[], maxBytes: number): string[][] {
+  const chunks: string[][] = [];
+  let current: string[] = [];
+  let size = 0;
+  for (const stmt of statements) {
+    const bytes = Buffer.byteLength(stmt, 'utf8') + 1; // 改行ぶん
+    if (current.length > 0 && size + bytes > maxBytes) {
+      chunks.push(current);
+      current = [];
+      size = 0;
+    }
+    current.push(stmt);
+    size += bytes;
+  }
+  if (current.length > 0) chunks.push(current);
+  return chunks;
+}
 export interface BackfillOptions {
   readonly apiKey: string;
   readonly baseUrl: string;
@@ -21,6 +72,8 @@ export interface BackfillOptions {
   readonly out: string;
   /** リクエスト間隔（ミリ秒）。レート制限に当てないための間引き。 */
   readonly delayMs: number;
+  /** 1 ファイルの上限（バイト）。既定は `DEFAULT_MAX_BYTES`。 */
+  readonly maxBytes?: number;
 }
 
 export async function runBackfill(options: BackfillOptions): Promise<number> {
@@ -110,9 +163,21 @@ export async function runBackfill(options: BackfillOptions): Promise<number> {
   }
 
   await mkdir(dirname(options.out), { recursive: true });
-  await writeFile(options.out, statements.join('\n') + '\n', 'utf8');
-  console.error(`\n${options.out} に ${totalRows} 行を書き出した。`);
-  console.error('D1 へ流し込む:');
-  console.error(`  npx wrangler d1 execute invest-db --remote --file=${options.out}`);
+  const chunks = splitByBytes(statements, options.maxBytes ?? DEFAULT_MAX_BYTES);
+  const written: string[] = [];
+  for (const [i, chunk] of chunks.entries()) {
+    const path = chunkPath(options.out, i + 1);
+    await writeFile(path, chunk.join('\n') + '\n', 'utf8');
+    written.push(path);
+  }
+
+  console.error(`\n${totalRows} 行を ${written.length} ファイルに書き出した:`);
+  for (const path of written) console.error(`  ${path}`);
+  console.error('\nD1 へ流し込む（**必ずこの順に**。外部キーがあるので順序が要る）:');
+  console.error(`  for f in $(ls ${chunkPath(options.out, 1).replace(/-001\.sql$/, '')}-*.sql | sort); do`);
+  console.error('    npx wrangler d1 execute invest-db --remote --env production --file="$f"');
+  console.error('  done');
+  console.error('\n途中で失敗したら、失敗したファイルから再開してよい');
+  console.error('（ON CONFLICT DO NOTHING なので、重ねて流しても壊れない）。');
   return 0;
 }

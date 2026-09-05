@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import { parseArgs, recentWeekday, resolveRule, runBacktestCommand, insertStatements, q, runCheck, reasonFrom, splitByBytes, chunkPath, DEFAULT_MAX_BYTES, assembleBackfill, priceInsertStatements } from '../.build/cli.mjs';
+import { parseArgs, recentWeekday, resolveRule, runBacktestCommand, insertStatements, q, runCheck, reasonFrom, keyHint, splitByBytes, chunkPath, DEFAULT_MAX_BYTES, assembleBackfill, priceInsertStatements } from '../.build/cli.mjs';
 
 test('引数の解析 — 値ありとフラグのみを区別する', () => {
   const a = parseArgs(['backfill', '--from', '2026-01-01', '--to', '2026-02-01', '--verbose']);
@@ -233,6 +233,44 @@ test('reasonFrom — よくある形から 1 行を取り出す', () => {
   assert.equal(reasonFrom(null), '');
   // 長すぎる本文は切る
   assert.equal(reasonFrom('x'.repeat(500)).length, 200);
+});
+
+// ---- 401 / 403 の行き先 -------------------------------------------------------
+//
+// **403 は 2 種類ある。** 経路が無い（前回これで 3 日溶かした）のと、
+// キーが効いていない（今回）の。API 自身は理由を書いてくるので、
+// そこから分岐して「次にどこを触るか」まで言う。
+//
+// キーは **3 箇所に別々のコピーがある**（手元 / Cloudflare / Actions）。
+// 1 つ回すと残り 2 つが黙って古くなるので、案内は 3 つとも出す。
+
+test('keyHint — 401 / 403 以外には何も足さない', () => {
+  assert.equal(keyHint(200, { data: [] }), '');
+  assert.equal(keyHint(400, { message: 'Your subscription covers ...' }), '');
+  assert.equal(keyHint(429, {}), '');
+  assert.equal(keyHint(500, {}), '');
+});
+
+test('keyHint — 経路が無い 403 は、キーではなく JP_PATHS へ誘導する', () => {
+  const hint = keyHint(403, {
+    message: 'The requested endpoint does not exist. Please check the URL, HTTP method, and API version',
+  });
+  assert.match(hint, /JP_PATHS/);
+  // ここでキーの話を持ち出すと、また遠回りさせることになる
+  assert.doesNotMatch(hint, /Actions/);
+});
+
+test('keyHint — キーが効いていない 403 は、置き場所 3 つを全部出す', () => {
+  const hint = keyHint(403, { message: 'The incoming api key is invalid or expired.' });
+  assert.match(hint, /JQUANTS_API_KEY/);
+  assert.match(hint, /Cloudflare/);
+  assert.match(hint, /Actions/);
+  // このプロセスがどこから読んだのかを言う（3 つのうちどれを直すかの手がかり）
+  assert.match(hint, /環境変数/);
+});
+
+test('keyHint — 401 もキー扱い', () => {
+  assert.match(keyHint(401, {}), /Actions/);
 });
 
 // ---- backfill の分割 ---------------------------------------------------------

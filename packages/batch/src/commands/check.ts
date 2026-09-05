@@ -1,4 +1,4 @@
-import { Jquants, JP_PATHS } from '../jquants.js';
+import { Jquants, JP_PATHS, keyHint } from '../jquants.js';
 
 /**
  * 疎通確認。
@@ -68,6 +68,9 @@ export async function runCheck(
       // **理由を必ず出す。** ここを捨てると、次に何をすればいいか分からない。
       const reason = reasonFrom(body);
       if (reason !== '') console.log(`    → ${reason}`);
+      // 401 / 403 は「次にどこを触るか」まで出す。経路違いとキー切れを取り違えない。
+      const hint = keyHint(status, body);
+      if (hint !== '') console.log(hint);
       if (status === 403) forbidden += 1;
       if (REQUIRED.has(path)) missingRequired.push(path);
       continue;

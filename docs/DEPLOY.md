@@ -110,6 +110,34 @@ npx wrangler secret list --env production      # 入ったか確認
 `JQUANTS_API_KEY が未設定` で落ち続ける。** `wrangler secret list --env production`
 が空なら、これ。
 
+### キーを更新したとき
+
+**J-Quants のキーは独立したコピーが 3 箇所にある。**
+1 つ更新しても、残りは古いキーを持ったまま黙って動き続ける。
+
+| | 誰が読むか | 更新の方法 | 古いままだとどうなるか |
+|---|---|---|---|
+| 手元の `export JQUANTS_API_KEY` | `check:datasource`・手元の backfill | シェルで export し直す | その場で 403 |
+| Cloudflare Worker の secret | **毎日 6:15 の Cron** | `npx wrangler secret put JQUANTS_API_KEY --env production` | **静かに失敗し続ける** |
+| GitHub Actions の secret | バックフィルのワークフロー | Settings → Secrets and variables → Actions | ワークフローが 403 で落ちる |
+
+**危ないのは 2 つめ。** Actions は即落ちるので気付くが、Worker の secret が
+古いと **Cron が毎朝失敗するだけで、誰も見ていなければ気付かない。**
+画面が古くなって初めて分かる。**キーを回したら必ず 3 つとも入れ直すこと。**
+
+> `wrangler secret list` は**名前しか出さない**。中身が新しいかどうかは
+> 表示されないので、「入っているように見える」で判断できない。
+> **迷ったら入れ直す**（同じ値を入れても害はない）。
+
+更新したら 1 つずつ確かめる:
+
+```bash
+npm run check:datasource
+curl.exe -X POST "https://app.goldencross-incomegains.com/api/run-pipeline"
+```
+
+Actions は 1 営業日ぶん（`from` = `to`）を `apply` off で空回しすれば足りる。
+
 ---
 
 ## 5. デプロイする
@@ -251,14 +279,38 @@ Windows では `.\scripts\diagnose.ps1`（`.sh` は PowerShell では動かな�
 
 ```bash
 export JQUANTS_API_KEY="..."
-npm run backfill -- --from 2024-01-01 --to 2026-08-27 --out out/backfill.sql
-cd packages/worker
-npx wrangler d1 execute invest-db --remote --file=../../out/backfill.sql
+npm run build -w @invest/batch --silent
+node packages/batch/.build/cli.mjs backfill --from 2024-09-02 --to 2026-09-04
 ```
 
-GitHub Actions から回すこともできる（`.github/workflows/backfill.yml`）。
-`JQUANTS_API_KEY` / `CLOUDFLARE_API_TOKEN` / `CLOUDFLARE_ACCOUNT_ID` を
-リポジトリの Secrets に登録しておく。
+> **node を直接呼ぶ。** `npm run backfill -- --from …` の args は script 文字列の
+> **末尾に連結される**ので、script が入れ子だと内側の npm が `--from` を
+> 自分のオプションとして食う。実際それで落ちた（`--from と --to は必須。`）。
+
+**出力は 1 本ではない。** 5 MB ずつ `out/backfill-001.sql` … と連番で分かれる
+（`wrangler d1 execute --file` に大きなファイルを渡せないため）。
+**連番の順に流すこと**——`market_calendar` / `symbols` の INSERT が
+`prices_daily` より先に来る必要がある（外部キー）:
+
+```bash
+cd packages/worker
+for f in $(ls ../../out/backfill-*.sql | sort); do
+  echo "適用: $f"
+  npx wrangler d1 execute invest-db --remote --env production --file="$f"
+done
+cd ../..
+```
+
+**`--env production` を落とさないこと。** 付けないと wrangler は既定の
+`[[d1_databases]]` を見に行く。本番を指しているのは
+`[[env.production.d1_databases]]` のほう。
+
+GitHub Actions から回すのが楽（`.github/workflows/backfill.yml`）。連番の適用も
+向こうがやる。`JQUANTS_API_KEY` / `CLOUDFLARE_API_TOKEN` / `CLOUDFLARE_ACCOUNT_ID` を
+リポジトリの Secrets に登録しておく。**これらは手元とも Cloudflare とも別のコピー**
+（下の「キーを更新したとき」）。
+
+見積もりと実測は `docs/GO-LIVE.md` の B3 にある。
 
 **Worker ではなくここで回す理由**: 500 銘柄 × 10 年 ≒ 122 万行あり、
 取得だけで約 2,450 リクエストになる。Worker の実行時間にも
@@ -436,10 +488,27 @@ npx wrangler d1 execute invest-db --remote \
 
 `job_runs.error` に失敗の理由が残っている。
 
-### `403` が返る
+### `403` が返る（画面・API）
 
 Cloudflare Access のポリシーに自分が入っていないか、`CF_ACCESS_AUD` が
 別のアプリケーションのものになっている。手順 9 の 4 をやり直す。
+
+### J-Quants が `403` を返す
+
+**Cloudflare の 403 とは無関係。** 本文に理由が書いてあるので、そこで分ける:
+
+| 本文 | 意味 | 直すところ |
+|---|---|---|
+| `The incoming api key is invalid or expired` | キーが効いていない | 上の「キーを更新したとき」の 3 箇所 |
+| `The requested endpoint does not exist` | **経路が違う。キーは無関係** | `JP_PATHS`（`packages/batch/src/jquants.ts`） |
+
+この 2 つは同じ状態コードで返るので、**本文を読まずにキーを疑うと遠回りする。**
+実際、経路違いを「契約プランの範囲外」と誤診して、プランを上げてキーを
+2 度発行し直すまで気付かなかった。いまは `check:datasource` も backfill も
+本文と「次にどこを触るか」を出す。
+
+**範囲外の日付は 403 ではなく 400。** そちらは API が範囲そのものを教えてくれる
+（`Your subscription covers the following dates: ...`）。
 
 ### Windows で `.ps1` の日本語が化ける
 

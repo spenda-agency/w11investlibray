@@ -8,6 +8,7 @@ import { DEFAULT_BASE_URL } from './jquants.js';
 export { resolveRule, runBacktestCommand } from './commands/backtest.js';
 export { insertStatements, q } from './sql.js';
 export { runCheck, reasonFrom } from './commands/check.js';
+export { Jquants, keyHint, JP_PATHS } from './jquants.js';
 export {
   splitByBytes,
   chunkPath,

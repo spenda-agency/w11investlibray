@@ -51,6 +51,43 @@ export const FIELD_ALIASES: Readonly<Record<string, readonly string[]>> = {
 
 export type Row = Record<string, unknown>;
 
+/**
+ * 401 / 403 に「次にどこを触るか」を足す。
+ *
+ * **403 は 2 種類ある。** どちらも同じ状態コードで返ってくるので、
+ * API 自身の言い分（本文）で分ける:
+ *
+ *   1. 経路が無い → API Gateway が経路なしとして 403。**キーは無関係。**
+ *      V1 の名前を /v2 に投げてこれを踏み、プランを上げてキーを 2 度
+ *      発行し直すまで気付かなかった。ここでキーの話をすると同じ遠回りになる
+ *   2. キーが効いていない → 期限切れ・失効・別のキー
+ *
+ * 2 のときに 3 箇所すべてを出すのは、**キーが独立したコピーで 3 つあり、
+ * 1 つ更新しても残りは古いまま**だから。Actions は即落ちるので気付くが、
+ * Cloudflare の secret が古いと **毎日の Cron が静かに失敗し続ける**。
+ *
+ * **キーの値は出さない。** 先頭数文字も出さない（ログに残る）。
+ */
+export function keyHint(status: number, body: unknown): string {
+  if (status !== 401 && status !== 403) return '';
+
+  const text = typeof body === 'string' ? body : JSON.stringify(body ?? '');
+  if (/endpoint does not exist/i.test(text)) {
+    return `  → 経路が違う。**キーの問題ではない。**
+     API Gateway は経路に一致しないリクエストへ 403 を返す。
+     packages/batch/src/jquants.ts の JP_PATHS と、叩いているパスを見比べること。`;
+  }
+
+  return `  → キーが効いていない。**このプロセスが読んだのは環境変数 JQUANTS_API_KEY。**
+     キーは独立したコピーが 3 箇所にある。1 つ更新しても残りは古いまま:
+       1. 手元の export JQUANTS_API_KEY   → check:datasource・手元の backfill
+       2. Cloudflare Worker の secret     → 毎日の Cron
+          npx wrangler secret put JQUANTS_API_KEY --env production
+       3. GitHub Actions の secret        → このワークフロー
+          Settings → Secrets and variables → Actions
+     手順は docs/DEPLOY.md の「キーを更新したとき」。`;
+}
+
 export interface FetchPage {
   readonly rows: Row[];
   readonly status: number;
@@ -100,7 +137,13 @@ export class Jquants {
         continue;
       }
       if (!res.ok) {
-        throw new Error(`J-Quants ${path} が ${res.status}: ${(await res.text()).slice(0, 200)}`);
+        // **本文を必ず出す。** 状態コードだけ出して本文を捨てていた時期があり、
+        // 「契約プランの範囲外」と誤診して遠回りした。理由は API が書いてくる。
+        const text = await res.text();
+        const hint = keyHint(res.status, text);
+        throw new Error(
+          `J-Quants ${path} が ${res.status}: ${text.slice(0, 200)}${hint === '' ? '' : `\n${hint}`}`,
+        );
       }
       const json = (await res.json()) as Record<string, unknown>;
       const chunk = json[key];

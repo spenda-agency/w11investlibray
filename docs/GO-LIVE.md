@@ -678,6 +678,14 @@ Light プランは **2021-09-05 以降**が取れる（`docs/DATA-SOURCES.md` §
 | `CLOUDFLARE_API_TOKEN` | dash.cloudflare.com → 右上のアイコン → API Tokens → Create Token → **Edit Cloudflare Workers** テンプレート |
 | `CLOUDFLARE_ACCOUNT_ID` | dash.cloudflare.com のドメイン概要ページ右下、または `npx wrangler whoami` |
 
+> **ここの secret は独立したコピー。** 手元の `export` とも、
+> B2 で `wrangler secret put` した Cloudflare 側とも別物で、
+> **キーを更新しても自動では追随しない。** J-Quants のキーを回したら
+> 3 箇所とも入れ直すこと（`docs/DEPLOY.md` の「キーを更新したとき」）。
+>
+> 古いままだと、ワークフローが最初の 1 リクエストで落ちる:
+> `J-Quants /markets/calendar が 403: {"message": "The incoming api key is invalid or expired."}`
+
 Actions タブ → 左の一覧から **「バックフィル」** → Run workflow。
 
 | 入力欄 | 入れる値 |

@@ -8,7 +8,14 @@ import { DEFAULT_BASE_URL } from './jquants.js';
 export { resolveRule, runBacktestCommand } from './commands/backtest.js';
 export { insertStatements, q } from './sql.js';
 export { runCheck, reasonFrom } from './commands/check.js';
-export { splitByBytes, chunkPath, DEFAULT_MAX_BYTES } from './commands/backfill.js';
+export {
+  splitByBytes,
+  chunkPath,
+  DEFAULT_MAX_BYTES,
+  assembleBackfill,
+  priceInsertStatements,
+  symbolInsertStatements,
+} from './commands/backfill.js';
 
 /**
  * 重い処理の入口。GitHub Actions から叩く。

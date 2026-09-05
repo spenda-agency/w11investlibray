@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import { parseArgs, recentWeekday, resolveRule, runBacktestCommand, insertStatements, q, runCheck, reasonFrom, splitByBytes, chunkPath, DEFAULT_MAX_BYTES } from '../.build/cli.mjs';
+import { parseArgs, recentWeekday, resolveRule, runBacktestCommand, insertStatements, q, runCheck, reasonFrom, splitByBytes, chunkPath, DEFAULT_MAX_BYTES, assembleBackfill, priceInsertStatements } from '../.build/cli.mjs';
 
 test('引数の解析 — 値ありとフラグのみを区別する', () => {
   const a = parseArgs(['backfill', '--from', '2026-01-01', '--to', '2026-02-01', '--verbose']);
@@ -358,4 +358,76 @@ test('npm 経由でもフラグ名が届く（ワークスペースを跨いで�
     `--from / --to が npm に食われている:\n${out}`,
   );
   assert.match(out, /JQUANTS_API_KEY が未設定/, 'フラグは届いたが、別の理由で止まっている');
+});
+
+// ---- backfill が実スキーマにそのまま流せること -------------------------------
+//
+// **prices_daily は symbols を参照している**（migrations/0001_init.sql:63）。
+// symbols を書かずに流すと `FOREIGN KEY constraint failed` で落ちる。
+// 実際、symbols を 1 行も書いていないまま「順序が大事」とだけ書いてあった。
+// ここは実スキーマに流して確かめる——それでしか捕まらない。
+
+/** 1 銘柄 1 日ぶんの価格行（列順は PRICE_COLUMNS と同じ）。 */
+const price = (symbolId, date, close) =>
+  [symbolId, date, close, close, close, close, 1000, close * 1000, 1];
+
+test('backfill — 生成した SQL が実スキーマにそのまま通る', async () => {
+  const { DatabaseSync } = await import('node:sqlite');
+
+  const master = new Map([
+    ['JP.72030', { code: '72030', name: 'トヨタ自動車', sector33: '輸送用機器', sector17: '自動車・輸送機' }],
+  ]);
+  // **JP.99990 は master に無い。** 期間の途中で上場廃止になった銘柄。
+  // 価格はあるので symbols にも行が要る（無いと FK で落ちる）。
+  const seen = new Map([['JP.72030', '72030'], ['JP.99990', '99990']]);
+
+  const sql = assembleBackfill({
+    from: '2026-09-01',
+    to: '2026-09-02',
+    tradingDays: ['2026-09-01', '2026-09-02'],
+    seen,
+    master,
+    priceStatements: [
+      ...priceInsertStatements([price('JP.72030', '2026-09-01', 3000), price('JP.99990', '2026-09-01', 500)]),
+      ...priceInsertStatements([price('JP.72030', '2026-09-02', 3050)]),
+    ],
+    now: '2026-09-05T00:00:00.000Z',
+  }).join('\n');
+
+  const db = new DatabaseSync(':memory:');
+  db.exec(await readFile(new URL('../../../migrations/0001_init.sql', import.meta.url), 'utf8'));
+  // **symbols を手で入れない。** 生成物だけで通ることを見る。
+  db.exec(sql);
+
+  assert.equal(db.prepare('SELECT COUNT(*) AS n FROM prices_daily').get().n, 3);
+  assert.equal(db.prepare('SELECT COUNT(*) AS n FROM market_calendar').get().n, 2);
+
+  const toyota = db.prepare("SELECT name, sector33 FROM symbols WHERE symbol_id = 'JP.72030'").get();
+  assert.equal(toyota.name, 'トヨタ自動車', 'master の名前を使っていない');
+  assert.equal(toyota.sector33, '輸送用機器');
+
+  // master に無い銘柄も行があり、名前はコードで埋まっている
+  const gone = db.prepare("SELECT name, delisted_at FROM symbols WHERE symbol_id = 'JP.99990'").get();
+  assert.equal(gone.name, '99990', 'master に無い銘柄の行が無い / 名前が空');
+  assert.equal(gone.delisted_at, null, '廃止を推測で埋めている');
+});
+
+test('backfill — symbols の INSERT は prices_daily より前', () => {
+  // 逆になると FOREIGN KEY constraint failed。連番ファイルに切るのは
+  // このあとなので、ここでの並びがそのまま適用順になる。
+  const sql = assembleBackfill({
+    from: '2026-09-01', to: '2026-09-01',
+    tradingDays: ['2026-09-01'],
+    seen: new Map([['JP.72030', '72030']]),
+    master: new Map(),
+    priceStatements: priceInsertStatements([price('JP.72030', '2026-09-01', 3000)]),
+    now: '2026-09-05T00:00:00.000Z',
+  });
+  const text = sql.join('\n');
+  const symbolsAt = text.indexOf('INSERT INTO symbols');
+  const pricesAt = text.indexOf('INSERT INTO prices_daily');
+  const calendarAt = text.indexOf('INSERT INTO market_calendar');
+  assert.ok(symbolsAt > 0 && pricesAt > 0 && calendarAt > 0, '3 つとも出ていない');
+  assert.ok(calendarAt < symbolsAt, 'market_calendar が symbols より後');
+  assert.ok(symbolsAt < pricesAt, 'symbols が prices_daily より後 — FK で落ちる');
 });

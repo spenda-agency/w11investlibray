@@ -28,6 +28,102 @@ import { insertStatements } from '../sql.js';
  * 大きさだけなので、そこだけ直してある。
  */
 
+/** `/equities/master` から拾う、銘柄の付随情報。 */
+export interface MasterRow {
+  readonly code: string;
+  readonly name: string;
+  readonly sector33: string | null;
+  readonly sector17: string | null;
+}
+
+/** `prices_daily` の列順。**production とテストで同じものを使う。** */
+const PRICE_COLUMNS = [
+  'symbol_id', 'date', 'open', 'high', 'low', 'close', 'volume', 'turnover', 'adjustment_factor',
+] as const;
+
+/** 日足の INSERT 文。1 日ぶんずつ呼ぶ。 */
+export function priceInsertStatements(rows: readonly (readonly unknown[])[]): string[] {
+  return insertStatements('prices_daily', [...PRICE_COLUMNS], rows, {
+    conflictTarget: 'symbol_id, date',
+  });
+}
+
+/**
+ * `symbols` の INSERT 文。
+ *
+ * **日足に出てきた銘柄は、必ず行を作る。** master に載っている銘柄だけに
+ * すると、期間の途中で上場廃止になった銘柄の価格が外部キーで弾かれる
+ * （prices_daily → symbols の FK。migrations/0001_init.sql:63）。
+ * CLAUDE.md の「上場廃止銘柄を symbols から消さない」の裏返し。
+ *
+ * master に無ければ `name = code` の最小行にする。
+ * **`delisted_at` は入れない。** master に無い＝廃止とは限らない
+ * （`from` の時点でまだ上場していなかっただけかもしれない）。
+ * 廃止の判定は日次パイプラインの仕事で、あちらは ON CONFLICT DO UPDATE
+ * なので、名前も業種もあとから整う。
+ */
+export function symbolInsertStatements(
+  seen: ReadonlyMap<string, string>,
+  master: ReadonlyMap<string, MasterRow>,
+  now: string,
+): string[] {
+  const rows = [...seen.entries()]
+    .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
+    .map(([symbolId, code]) => {
+      const info = master.get(symbolId);
+      return [
+        symbolId,
+        'JP',
+        code,
+        info?.name ?? code,
+        info?.sector33 ?? null,
+        info?.sector17 ?? null,
+        'JPY',
+        now,
+      ] as const;
+    });
+  return insertStatements(
+    'symbols',
+    ['symbol_id', 'market', 'code', 'name', 'sector33', 'sector17', 'currency', 'updated_at'],
+    rows,
+    { conflictTarget: 'symbol_id' },
+  );
+}
+
+/**
+ * 文を並べる。**順序がすべて。**
+ *
+ *   market_calendar → symbols → prices_daily
+ *
+ * `prices_daily` は `symbols` を参照しているので、逆にすると
+ * `FOREIGN KEY constraint failed` で落ちる。連番ファイルに切るのは
+ * このあとなので、ここでの並びがそのまま適用順になる。
+ */
+export function assembleBackfill(input: {
+  readonly from: string;
+  readonly to: string;
+  readonly tradingDays: readonly string[];
+  readonly seen: ReadonlyMap<string, string>;
+  readonly master: ReadonlyMap<string, MasterRow>;
+  readonly priceStatements: readonly string[];
+  readonly now: string;
+}): string[] {
+  return [
+    '-- 自動生成（npm run backfill）。D1 へ流し込む用。手で編集しないこと。',
+    `-- 期間: ${input.from} 〜 ${input.to} / 営業日 ${input.tradingDays.length} 日`,
+    `-- 銘柄: ${input.seen.size}`,
+    '',
+    ...insertStatements(
+      'market_calendar',
+      ['market', 'date', 'is_open'],
+      input.tradingDays.map((d) => ['JP', d, 1]),
+      { conflictTarget: 'market, date' },
+    ),
+    ...symbolInsertStatements(input.seen, input.master, input.now),
+    ...input.priceStatements,
+  ];
+}
+
 /** 1 ファイルの上限。D1 の取り込みに余裕を持たせた値。 */
 export const DEFAULT_MAX_BYTES = 5 * 1024 * 1024;
 
@@ -110,20 +206,30 @@ export async function runBackfill(options: BackfillOptions): Promise<number> {
     return 1;
   }
 
-  const statements: string[] = [
-    '-- 自動生成（npm run backfill）。D1 へ流し込む用。手で編集しないこと。',
-    `-- 期間: ${options.from} 〜 ${options.to} / 営業日 ${tradingDays.length} 日`,
-    '',
-  ];
+  // **銘柄の名前と業種を先に引く。** 期間の両端で引くのは、途中で
+  // 上場廃止になった銘柄の名前が `to` 時点では取れないため。2 回で済む。
+  const master = new Map<string, MasterRow>();
+  for (const asOf of new Set([options.from, options.to])) {
+    console.error(`銘柄一覧を取得: ${asOf}`);
+    for (const row of await client.getAll(JP_PATHS.master, { date: asOf })) {
+      const code = client.stringOf(row, 'code');
+      if (code === null) continue;
+      const symbolId = toSymbolId('JP', code);
+      // `to` を後に見るので、あとから来たほうが勝つ（新しい名前を優先）。
+      master.set(symbolId, {
+        code,
+        name: client.stringOf(row, 'companyName') ?? code,
+        sector33: client.stringOf(row, 'sector33'),
+        sector17: client.stringOf(row, 'sector17'),
+      });
+    }
+    if (options.delayMs > 0) await sleep(options.delayMs);
+  }
+  console.error(`銘柄一覧: ${master.size} 件`);
 
-  statements.push(
-    ...insertStatements(
-      'market_calendar',
-      ['market', 'date', 'is_open'],
-      tradingDays.map((d) => ['JP', d, 1]),
-      { conflictTarget: 'market, date' },
-    ),
-  );
+  // 日足に出てきた銘柄。**master に無いものもここに入る**（期間中に廃止）。
+  const seen = new Map<string, string>();
+  const priceStatements: string[] = [];
 
   let totalRows = 0;
   for (const [i, date] of tradingDays.entries()) {
@@ -134,8 +240,10 @@ export async function runBackfill(options: BackfillOptions): Promise<number> {
       const close = client.numberOf(row, 'close');
       // 売買が成立しなかった銘柄は行を作らない（0 で埋めると指標が壊れる）。
       if (code === null || close === null) continue;
+      const symbolId = toSymbolId('JP', code);
+      seen.set(symbolId, code);
       priceRows.push([
-        toSymbolId('JP', code),
+        symbolId,
         client.stringOf(row, 'date') ?? date,
         client.numberOf(row, 'open') ?? close,
         client.numberOf(row, 'high') ?? close,
@@ -146,14 +254,7 @@ export async function runBackfill(options: BackfillOptions): Promise<number> {
         client.numberOf(row, 'adjustmentFactor') ?? 1,
       ]);
     }
-    statements.push(
-      ...insertStatements(
-        'prices_daily',
-        ['symbol_id', 'date', 'open', 'high', 'low', 'close', 'volume', 'turnover', 'adjustment_factor'],
-        priceRows,
-        { conflictTarget: 'symbol_id, date' },
-      ),
-    );
+    priceStatements.push(...priceInsertStatements(priceRows));
     totalRows += priceRows.length;
 
     if ((i + 1) % 20 === 0 || i === tradingDays.length - 1) {
@@ -161,6 +262,17 @@ export async function runBackfill(options: BackfillOptions): Promise<number> {
     }
     if (options.delayMs > 0) await sleep(options.delayMs);
   }
+
+  // **組み立ては最後。** symbols の中身は全日を見終わるまで確定しない。
+  const statements = assembleBackfill({
+    from: options.from,
+    to: options.to,
+    tradingDays,
+    seen,
+    master,
+    priceStatements,
+    now: new Date().toISOString(),
+  });
 
   await mkdir(dirname(options.out), { recursive: true });
   const chunks = splitByBytes(statements, options.maxBytes ?? DEFAULT_MAX_BYTES);
@@ -171,7 +283,7 @@ export async function runBackfill(options: BackfillOptions): Promise<number> {
     written.push(path);
   }
 
-  console.error(`\n${totalRows} 行を ${written.length} ファイルに書き出した:`);
+  console.error(`\n日足 ${totalRows} 行 / 銘柄 ${seen.size} 件を ${written.length} ファイルに書き出した:`);
   for (const path of written) console.error(`  ${path}`);
   console.error('\nD1 へ流し込む（**必ずこの順に**。外部キーがあるので順序が要る）:');
   console.error(`  for f in $(ls ${chunkPath(options.out, 1).replace(/-001\.sql$/, '')}-*.sql | sort); do`);

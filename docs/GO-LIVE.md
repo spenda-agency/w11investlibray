@@ -708,8 +708,16 @@ Actions で 1 時間ほど見ておく。**途中で失敗しても、失敗し�
 
 ```bash
 export JQUANTS_API_KEY=本物のキー
-npm run backfill -- --from 2024-09-02 --to 2026-09-04
+npm run build -w @invest/batch --silent
+node packages/batch/.build/cli.mjs backfill --from 2024-09-02 --to 2026-09-04
 ```
+
+> **node を直接呼ぶ形を載せてある。** `npm run backfill -- --from …` でも
+> 動くが、`npm run X -- args` の args は X の文字列の**末尾に連結される**ので、
+> script が入れ子だと内側の npm が `--from` を自分のオプションとして食う。
+> 実際それで落ちた（`--from と --to は必須。` と出て、値だけが位置引数に
+> なっていた）。ルートの script 末尾に `--` を置いて直してあるが、
+> **node 直呼びなら段が無いぶん壊れようがない。**
 
 書き出したファイルの一覧と、流し込むコマンドが最後に表示される。
 **連番の順に流すこと:**

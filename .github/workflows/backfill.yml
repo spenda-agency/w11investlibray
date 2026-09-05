@@ -35,8 +35,15 @@ jobs:
       - name: 取得して SQL を生成
         env:
           JQUANTS_API_KEY: ${{ secrets.JQUANTS_API_KEY }}
+        # **npm を挟まず node を直接呼ぶ。**
+        # `npm run X -- args` の args は X の文字列の末尾に連結されるので、
+        # script が入れ子になっていると内側の npm が `--from` を自分の
+        # オプションとして食い、**フラグ名が消えて値だけが流れる**。
+        # 実際それで落ちた（`--from と --to は必須。`）。
+        # node に直接渡せば、npm の解釈は一切挟まらない。
         run: |
-          npm run backfill -- \
+          npm run build -w @invest/batch --silent
+          node packages/batch/.build/cli.mjs backfill \
             --from "${{ inputs.from }}" \
             --to "${{ inputs.to }}" \
             --out out/backfill.sql

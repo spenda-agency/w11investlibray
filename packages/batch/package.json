@@ -10,9 +10,12 @@
     "build:test": "npm run build",
     "test": "npm run build && node --test test/*.test.mjs",
     "cli": "npm run build --silent && node .build/cli.mjs",
-    "check:datasource": "npm run cli --silent -- check",
-    "backfill": "npm run cli --silent -- backfill",
-    "backtest": "npm run cli --silent -- backtest"
+    "precheck:datasource": "npm run build --silent",
+    "check:datasource": "node .build/cli.mjs check",
+    "prebackfill": "npm run build --silent",
+    "backfill": "node .build/cli.mjs backfill",
+    "prebacktest": "npm run build --silent",
+    "backtest": "node .build/cli.mjs backtest"
   },
   "dependencies": {
     "@invest/core": "*"

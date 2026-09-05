@@ -3,6 +3,8 @@ import assert from 'node:assert/strict';
 import { readFile, mkdtemp, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { execFileSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
 import { parseArgs, recentWeekday, resolveRule, runBacktestCommand, insertStatements, q, runCheck, reasonFrom, splitByBytes, chunkPath, DEFAULT_MAX_BYTES } from '../.build/cli.mjs';
 
 test('引数の解析 — 値ありとフラグのみを区別する', () => {
@@ -291,4 +293,69 @@ test('backfill — マルチバイトをバイト数で数える', () => {
   const jp = 'あ'.repeat(10); // 30 バイト
   const chunks = splitByBytes([jp, jp], 40);
   assert.equal(chunks.length, 2, 'バイト数ではなく文字数で数えている');
+});
+
+// ---- npm から引数が届くか -----------------------------------------------------
+//
+// **parseArgs の単体テストは通っていた。壊れていたのはその手前。**
+// `npm run X -- args` の args は X の文字列の末尾に連結されるので、
+// script が入れ子になっていると内側の npm が `--from` を自分のオプションと
+// して食う。フラグ名が消えて値だけが流れ、B3 が最初の 1 歩で落ちた:
+//
+//   > npm run cli --silent -- backfill 2024-09-02 2026-09-04 out/backfill.sql
+//   --from と --to は必須。
+//
+// ここは npm を実際に起動しないと確かめようがない。遅いが置く。
+
+/** `npm run` を起動して、標準出力と標準エラーをまとめて返す。 */
+function runNpm(args) {
+  const root = fileURLToPath(new URL('../../..', import.meta.url));
+  try {
+    return execFileSync('npm', args, {
+      cwd: root,
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'pipe'],
+      env: { ...process.env, JQUANTS_API_KEY: '' },
+    });
+  } catch (err) {
+    // 非 0 で終わるのは想定内（不明なルールで落とす）
+    return `${err.stdout ?? ''}${err.stderr ?? ''}`;
+  }
+}
+
+test('npm 経由でもフラグ名が届く（ワークスペース内）', { timeout: 120_000 }, async () => {
+  // --rule が消えると既定の golden-cross になり、この文言は出ない。
+  // つまり「名前ごと届いている」ことの証拠になる。
+  // **入力ファイルは実在させる。** 読み込みがルール解決より先なので、
+  // 無いパスを渡すと ENOENT で止まり、--rule まで到達しない。
+  const dir = await mkdtemp(join(tmpdir(), 'npmargs-'));
+  const input = join(dir, 'empty.json');
+  await writeFile(input, '{}', 'utf8');
+
+  const out = runNpm([
+    'run', 'backtest', '-w', '@invest/batch', '--silent', '--',
+    '--input', input, '--rule', 'nope',
+  ]);
+  assert.match(out, /不明なルール: nope/, 'npm が --rule を食っている');
+});
+
+test('npm 経由でもフラグ名が届く（ワークスペースを跨いで）', { timeout: 120_000 }, () => {
+  // **ここが実際に壊れていた経路。** ルートの script が
+  // `npm run backfill -w @invest/batch` と入れ子になっていたため、
+  // --from / --to / --out が名前ごと消えた。
+  // ルートの script 末尾に `--` を置き、batch 側の leaf を node で
+  // 終わらせることで直してある。
+  //
+  // 見分け方: 引数の検証を API キーより先に置いてあるので、
+  //   フラグが届いた  → 「JQUANTS_API_KEY が未設定。」まで進む
+  //   フラグが消えた  → 「--from と --to は必須。」で止まる
+  // ネットワークにも本物のキーにも触らずに判定できる。
+  const out = runNpm([
+    'run', 'backfill', '--silent', '--', '--from', '2026-09-01', '--to', '2026-09-02',
+  ]);
+  assert.ok(
+    !out.includes('--from と --to は必須'),
+    `--from / --to が npm に食われている:\n${out}`,
+  );
+  assert.match(out, /JQUANTS_API_KEY が未設定/, 'フラグは届いたが、別の理由で止まっている');
 });

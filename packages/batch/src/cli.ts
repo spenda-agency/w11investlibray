@@ -86,14 +86,16 @@ async function main(): Promise<number> {
       return runCheck(apiKey, baseUrl, flags['date'] ?? recentWeekday(new Date(), 3));
     }
     case 'backfill': {
-      if (!apiKey) {
-        console.error('JQUANTS_API_KEY が未設定。');
-        return 1;
-      }
+      // **引数の検証を API キーより先に。** 引数の間違いはコマンドラインを
+      // 見れば直せるが、キーは探しに行く必要がある。安いほうを先に言う。
       const from = flags['from'];
       const to = flags['to'];
       if (from === undefined || to === undefined) {
         console.error('--from と --to は必須。');
+        return 1;
+      }
+      if (!apiKey) {
+        console.error('JQUANTS_API_KEY が未設定。');
         return 1;
       }
       return runBackfill({

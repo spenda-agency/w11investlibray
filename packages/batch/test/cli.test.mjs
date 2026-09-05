@@ -145,10 +145,10 @@ test('入力が少なすぎる銘柄は黙って飛ばす', async () => {
 
 // ---- check の診断 -----------------------------------------------------------
 //
-// **状態コードだけ見て本文を捨てていた。** Light プランに上げた直後の
-// 全 403 を「契約プランの範囲外」と誤診し、しかも終了コードは 0 だった。
-// /listed/info は最下位のプランでも通るので、全部 403 なら
-// プランの話ではありえない——そこまで言えないと診断の意味がない。
+// **状態コードだけ見て本文を捨てていた。** 全 403 を「契約プランの範囲外」と
+// 誤診し、しかも終了コードは 0 だった。真因は経路が V1 のままだったこと
+// （API Gateway は経路に一致しないと 403 を返す）。本文には
+// 「endpoint does not exist」と書いてあったのに、それを表示していなかった。
 
 /** console.log を捕まえて、出力と戻り値の両方を見る。 */
 async function captureCheck(responses) {
@@ -164,56 +164,61 @@ async function captureCheck(responses) {
   }
 }
 
-const ALL_PATHS = [
-  '/listed/info', '/prices/daily_quotes', '/markets/trading_calendar',
-  '/fins/statements', '/fins/announcement',
-];
+// V2 の経路。V1 の名前（/listed/info など）ではない。
+const ALL_PATHS = ['/equities/master', '/equities/bars/daily', '/markets/calendar'];
 
 test('check — API が返した理由をそのまま出す', async () => {
-  // **ここが今回いちばん効く。** 理由が出ていれば一度で分かった。
+  // **ここが今回いちばん効く。** 実際に返ってきたのはこの本文で、
+  // これを表示していれば一度で原因に辿り着けた。
   const { out } = await captureCheck(
     Object.fromEntries(ALL_PATHS.map((p) => [p, {
-      status: 403, body: { message: 'The incoming token is invalid.' },
+      status: 403, body: { message: 'The requested endpoint does not exist.' },
     }])),
   );
-  assert.match(out, /The incoming token is invalid\./);
+  assert.match(out, /The requested endpoint does not exist\./);
 });
 
 test('check — 全部 403 なら「プランの範囲外」とは言わない', async () => {
   const { code, out } = await captureCheck(
     Object.fromEntries(ALL_PATHS.map((p) => [p, { status: 403, body: { message: 'forbidden' } }])),
   );
-  assert.match(out, /キーが効いていない可能性が高い/);
-  assert.match(out, /発行し直す/);
+  assert.match(out, /契約プランの範囲外ではない/);
+  assert.match(out, /経路が間違っている/, '真因（経路違い）を筆頭に挙げていない');
+  assert.match(out, /endpoint does not exist/, '見分け方を書いていない');
   // 1 本ごとに「（契約プランの範囲外の可能性）」と断定していた行は、もう出さない
   assert.ok(!out.includes('（契約プランの範囲外の可能性）'), '1 本ごとに断定している');
   assert.equal(code, 1, '必要な 3 本が取れないのに成功で返している');
 });
 
-test('check — /fins/* だけ 403 なら先へ進んでよい', async () => {
-  const rows = { status: 200, body: { info: [{ Code: '13010', CompanyName: 'テスト' }] } };
+test('check — 3 本とも通れば成功で返る', async () => {
+  // **レコードは `data` に入る。** 経路ごとに違うキーだったのは V1。
   const { code, out } = await captureCheck({
-    '/listed/info': rows,
-    '/prices/daily_quotes': { status: 200, body: { daily_quotes: [{ Code: '13010', C: 100 }] } },
-    '/markets/trading_calendar': { status: 200, body: { trading_calendar: [{ Date: '2026-09-01' }] } },
-    '/fins/statements': { status: 403, body: { message: 'not in your plan' } },
-    '/fins/announcement': { status: 403, body: { message: 'not in your plan' } },
+    '/equities/master': { status: 200, body: { data: [{ Code: '13010', CompanyName: 'テスト' }] } },
+    '/equities/bars/daily': { status: 200, body: { data: [{ Code: '13010', C: 100 }] } },
+    '/markets/calendar': { status: 200, body: { data: [{ Date: '2026-09-01' }] } },
   });
-  assert.match(out, /先へ進んでよい/);
-  assert.equal(code, 0, 'Phase 1b の 403 で止めている');
-  // 200 のときの振る舞いは変えていない
+  assert.equal(code, 0);
+  // 実際に返ってきた項目名を見せるのが、このコマンドの本来の仕事
   assert.match(out, /実際の項目名: Code, CompanyName/);
+});
+
+test('check — 財務は叩かない（V2 の経路が未確認なので推測しない）', async () => {
+  // 当てずっぽうのパスを置いて 403 を眺めるのが、今回の遠回りそのものだった。
+  const { out } = await captureCheck({
+    '/equities/master': { status: 200, body: { data: [] } },
+    '/equities/bars/daily': { status: 200, body: { data: [] } },
+    '/markets/calendar': { status: 200, body: { data: [] } },
+  });
+  assert.ok(!out.includes('/fins/'), '未確認の経路を叩いている');
 });
 
 test('check — 必要な 3 本のどれかが落ちたら非 0 で終わる', async () => {
   const { code, out } = await captureCheck({
-    '/listed/info': { status: 200, body: { info: [] } },
-    '/prices/daily_quotes': { status: 500, body: { message: 'boom' } },
-    '/markets/trading_calendar': { status: 200, body: { trading_calendar: [] } },
-    '/fins/statements': { status: 200, body: { statements: [] } },
-    '/fins/announcement': { status: 200, body: { announcement: [] } },
+    '/equities/master': { status: 200, body: { data: [] } },
+    '/equities/bars/daily': { status: 500, body: { message: 'boom' } },
+    '/markets/calendar': { status: 200, body: { data: [] } },
   });
-  assert.match(out, /\/prices\/daily_quotes が取れない/);
+  assert.match(out, /\/equities\/bars\/daily が取れない/);
   assert.equal(code, 1);
 });
 

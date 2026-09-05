@@ -10,6 +10,7 @@ export * from '../src/db/queries.js';
 export * from '../src/jobs/date.js';
 export { runDailyPipeline, JOB_NAME } from '../src/jobs/dailyPipeline.js';
 export {
+  JP_PATHS,
   JquantsClient,
   JquantsJpSource,
   JquantsError,

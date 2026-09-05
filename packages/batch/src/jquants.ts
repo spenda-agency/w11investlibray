@@ -12,6 +12,27 @@
 
 export const DEFAULT_BASE_URL = 'https://api.jquants.com/v2';
 
+/**
+ * V2 の経路。**V1 とは名前がまったく違う。**
+ *
+ *   /listed/info              → /equities/master
+ *   /prices/daily_quotes      → /equities/bars/daily
+ *   /markets/trading_calendar → /markets/calendar
+ *
+ * V1 の名前のまま /v2 に投げると、API Gateway が経路なしとして **403** を返す。
+ * 「契約プランの範囲外」に見えるので、原因に辿り着くまで遠回りした。
+ * 出典は本番運用中の実装（spenda-agency/w09jquantsclaude の
+ * `src/jqsd/jquants.py`）。**推測で書かないこと。**
+ *
+ * Worker 側（packages/worker/src/connectors/jquants.ts の JP_PATHS）と
+ * 同じ値を持つ。**片方だけ直すと本番とバックフィルがずれる。**
+ */
+export const JP_PATHS = {
+  master: '/equities/master',
+  dailyBars: '/equities/bars/daily',
+  calendar: '/markets/calendar',
+} as const;
+
 export const FIELD_ALIASES: Readonly<Record<string, readonly string[]>> = {
   date: ['Date', 'date', 'Dt'],
   code: ['Code', 'code', 'Cd'],
@@ -20,9 +41,9 @@ export const FIELD_ALIASES: Readonly<Record<string, readonly string[]>> = {
   low: ['Low', 'L', 'AdjustmentLow'],
   close: ['Close', 'C', 'AdjustmentClose'],
   volume: ['Volume', 'V', 'Vo', 'AdjustmentVolume'],
-  turnover: ['TurnoverValue', 'TuVa', 'Turnover'],
-  adjustmentFactor: ['AdjustmentFactor', 'AdjFa', 'AdjF'],
-  companyName: ['CompanyName', 'Name', 'CoNm'],
+  turnover: ['TurnoverValue', 'Va', 'TurnoverVa', 'TuVa', 'Turnover'],
+  adjustmentFactor: ['AdjustmentFactor', 'AdjFactor', 'AdjustmentF', 'AdjFa', 'AdjF'],
+  companyName: ['CompanyName', 'CompanyNameJapanese', 'Name', 'CoName', 'Nm', 'CoNm'],
   sector33: ['Sector33CodeName', 'Sector33Code', 'Sc33Nm'],
   sector17: ['Sector17CodeName', 'Sector17Code', 'Sc17Nm'],
   holidayDivision: ['HolidayDivision', 'HolidayDiv', 'HdDiv'],
@@ -59,7 +80,12 @@ export class Jquants {
     return { status: res.status, body };
   }
 
-  async getAll(path: string, params: Record<string, string>, key: string): Promise<Row[]> {
+  /**
+   * **レコードは `data` キーに入る。** V1 は経路ごとに違うキーだったが、
+   * V2 は全経路 `data` で揃っている。既定値にしてあるのは、
+   * また変わったときに 1 箇所で受けられるようにするため。
+   */
+  async getAll(path: string, params: Record<string, string>, key = 'data'): Promise<Row[]> {
     const rows: Row[] = [];
     let paginationKey: string | undefined;
     for (let page = 0; page < 200; page += 1) {

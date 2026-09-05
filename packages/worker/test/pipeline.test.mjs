@@ -25,16 +25,22 @@ function fakeJquantsFetch({ symbols, barsByDate, calendar }) {
   return async (rawUrl) => {
     const url = new URL(rawUrl);
     const date = url.searchParams.get('date') ?? '';
-    if (url.pathname.endsWith('/listed/info')) {
-      return json({ info: symbols });
+    // **経路とレスポンスの形は V2 の実物に合わせる。**
+    // ここを実装の側に合わせて書いていたせいで、V1 の経路名のまま
+    // 全テストが通り、本番だけが 403 で落ちていた。
+    // 出典: spenda-agency/w09jquantsclaude の src/jqsd/jquants.py
+    if (url.pathname.endsWith('/equities/master')) {
+      return json({ data: symbols });
     }
-    if (url.pathname.endsWith('/prices/daily_quotes')) {
-      return json({ daily_quotes: barsByDate[date] ?? [] });
+    if (url.pathname.endsWith('/equities/bars/daily')) {
+      return json({ data: barsByDate[date] ?? [] });
     }
-    if (url.pathname.endsWith('/markets/trading_calendar')) {
-      return json({ trading_calendar: calendar });
+    if (url.pathname.endsWith('/markets/calendar')) {
+      return json({ data: calendar });
     }
-    return json({}, 404);
+    // **V1 の経路名で来たら 403。** 本物の API Gateway と同じ振る舞い
+    // （経路に一致しないと 403 で「endpoint does not exist」）。
+    return json({ message: 'The requested endpoint does not exist.' }, 403);
   };
 }
 

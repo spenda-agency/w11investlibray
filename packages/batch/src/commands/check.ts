@@ -1,4 +1,4 @@
-import { Jquants } from '../jquants.js';
+import { Jquants, JP_PATHS } from '../jquants.js';
 
 /**
  * 疎通確認。
@@ -15,7 +15,7 @@ import { Jquants } from '../jquants.js';
  */
 
 /** Phase 1 の日次パイプラインが実際に叩くもの。ここが通らなければ先へ進めない。 */
-const REQUIRED = new Set(['/listed/info', '/prices/daily_quotes', '/markets/trading_calendar']);
+const REQUIRED = new Set<string>([JP_PATHS.master, JP_PATHS.dailyBars, JP_PATHS.calendar]);
 
 interface Probe {
   (path: string, params: Record<string, string>): Promise<{ status: number; body: unknown }>;
@@ -48,19 +48,20 @@ export async function runCheck(
   const call: Probe = probe ?? ((path, params) => new Jquants(apiKey, baseUrl).probe(path, params));
   console.log(`J-Quants 疎通確認  base=${baseUrl}  date=${date}\n`);
 
-  const endpoints: [string, string, Record<string, string>, string][] = [
-    ['銘柄一覧', '/listed/info', { date }, 'info'],
-    ['日足', '/prices/daily_quotes', { date }, 'daily_quotes'],
-    ['営業日', '/markets/trading_calendar', { from: date, to: date }, 'trading_calendar'],
-    ['財務', '/fins/statements', { date }, 'statements'],
-    ['決算発表予定', '/fins/announcement', {}, 'announcement'],
+  // **財務（Phase 1b）はここに入れない。** V2 での経路を確認できていないので、
+  // 当てずっぽうのパスを置いて 403 を眺めることになる——それが今回の失敗そのもの。
+  // 使う段になったら、仕様を確認してから足す。
+  const endpoints: [string, string, Record<string, string>][] = [
+    ['銘柄一覧', JP_PATHS.master, { date }],
+    ['日足', JP_PATHS.dailyBars, { date }],
+    ['営業日', JP_PATHS.calendar, { from: date, to: date }],
   ];
 
   let ok = 0;
   let forbidden = 0;
   const missingRequired: string[] = [];
 
-  for (const [label, path, params, key] of endpoints) {
+  for (const [label, path, params] of endpoints) {
     const { status, body } = await call(path, params);
     if (status !== 200) {
       console.log(`✗ ${label.padEnd(14)} ${path}  HTTP ${status}`);
@@ -72,7 +73,8 @@ export async function runCheck(
       continue;
     }
     ok += 1;
-    const rows = (body as Record<string, unknown>)[key];
+    // V2 はどの経路もレコードを `data` に入れる。
+    const rows = (body as Record<string, unknown>)['data'];
     const list = Array.isArray(rows) ? (rows as Record<string, unknown>[]) : [];
     console.log(`✓ ${label.padEnd(14)} ${path}  ${list.length} 件`);
     const first = list[0];
@@ -84,22 +86,20 @@ export async function runCheck(
   console.log('');
 
   // **403 の意味は、1 本ずつでは決まらない。全体を見てから言う。**
-  // /listed/info は最下位のプランでも通るので、全部 403 なら
-  // 「プランの範囲外」ではありえない。キーのほうを疑う。
+  // /equities/master は最下位のプランでも通る。全部 403 なら
+  // 「プランの範囲外」ではありえない。
   if (ok === 0 && forbidden === endpoints.length) {
-    console.log(`すべて 403。契約プランの範囲外ではなく、キーが効いていない可能性が高い。
-  /listed/info は最下位のプランでも通るので、全部が 403 になる説明にならない。
+    console.log(`すべて 403。契約プランの範囲外ではない。
+  ${JP_PATHS.master} は最下位のプランでも通るので、全部が 403 になる説明にならない。
   疑う順に:
-    1. プランを上げる前に発行したキーを使っている → 発行し直す
-    2. プラン変更がまだ反映されていない → 少し待ってもう一度
-    3. 別のプロジェクトのキーを渡している → ダッシュボードで確認する
-  上に出ている「→」の行が、API 自身の言い分。まずそれを読むこと。`);
+    1. **経路が間違っている。** API Gateway は経路に一致しないリクエストへ 403 を返す。
+       上の「→」に「endpoint does not exist」と書いてあればこれ（一度これで嵌まった）
+    2. キーが効いていない → ダッシュボードで発行し直す
+    3. プラン変更がまだ反映されていない → 少し待ってもう一度
+  「→」の行が API 自身の言い分。推測より先にそれを読むこと。`);
   } else if (missingRequired.length > 0) {
     console.log(`日次パイプラインに必要な ${missingRequired.join(' / ')} が取れない。
-  ここが通らないとトラック B は進められない。プランの内容を確認すること。`);
-  } else if (forbidden > 0) {
-    console.log(`403 が出ているのは Phase 1b で使うもの（/fins/*）だけ。先へ進んでよい。
-  財務データを使う段階になったらプランを見直す。`);
+  ここが通らないとトラック B は進められない。上の「→」の行を読むこと。`);
   }
 
   console.log(`
@@ -108,9 +108,9 @@ export async function runCheck(
     packages/worker/src/connectors/jquants.ts と packages/batch/src/jquants.ts の
     FIELD_ALIASES に足すか、環境変数 JQUANTS_FIELD_ALIASES で上書きする。
   - 日次パイプラインに要るのは
-    /listed/info と /prices/daily_quotes と /markets/trading_calendar の 3 本。
+    ${JP_PATHS.master} と ${JP_PATHS.dailyBars} と ${JP_PATHS.calendar} の 3 本。
+  - 財務（Phase 1b）は V2 での経路が未確認なので、ここでは叩いていない。
   - 確認できた内容を docs/DATA-SOURCES.md に日付付きで記録すること。`);
 
-  // /fins/* だけの 403 は成功扱い（Phase 1b の話なので、いま止める理由がない）。
   return missingRequired.length === 0 ? 0 : 1;
 }

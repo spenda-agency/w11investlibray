@@ -18,13 +18,38 @@
 
 ### 使うエンドポイント
 
+**出典: 本番運用中の `spenda-agency/w09jquantsclaude`（`src/jqsd/jquants.py`）。**
+ここは推測で書かない。一度やって高くついた（下記）。
+
 | 用途 | パス | 備考 |
 |---|---|---|
-| 銘柄一覧 | `/listed/info` | `date` 指定で**その時点の**一覧が取れる。廃止銘柄の把握に必須 |
-| 日足 | `/prices/daily_quotes` | `date` 指定で **1 リクエストに全銘柄**が返る。500 でも 4,000 でも取得コストは同じ |
-| 営業日 | `/markets/trading_calendar` | 営業日判定を推測でやらない |
-| 財務 | `/fins/statements` | Phase 1b。`DisclosedDate` を point-in-time の基準にする |
-| 決算発表予定 | `/fins/announcement` | Phase 1b |
+| 銘柄一覧 | `/equities/master` | `date` 指定で**その時点の**一覧が取れる。廃止銘柄の把握に必須 |
+| 日足 | `/equities/bars/daily` | `date` 指定で **1 リクエストに全銘柄**が返る。500 でも 4,000 でも取得コストは同じ |
+| 営業日 | `/markets/calendar` | 営業日判定を推測でやらない |
+| 財務 | **未確認** | Phase 1b。V2 での経路を確認してから書く |
+
+**レコードは `data` キーに入る。** ページングは `pagination_key`。
+V1 は経路ごとに違うキー（`info` / `daily_quotes` / …）だったが、V2 は揃っている。
+
+> ### 経路を V1 のまま書いて 403 を追いかけた（2026-09-05）
+>
+> この表は当初 V1 の名前（`/listed/info`・`/prices/daily_quotes`・
+> `/markets/trading_calendar`）のまま書かれていた。base URL と認証だけが
+> V2 で変わったと思い込み、**確認せずに断定して書いた。**
+>
+> V1 の経路名を `/v2` に投げると、API Gateway が経路なしとして **403** を返す。
+> 5 本すべてが 403 になるので「契約プランの範囲外」に見え、
+> **プランを Free → Light に上げ、API キーを 2 度発行し直すまで気付かなかった。**
+>
+> 答えは最初から応答本文にあった:
+>
+> ```
+> {"message": "The requested endpoint does not exist.
+>              Please check the URL, HTTP method, and API version"}
+> ```
+>
+> `check:datasource` が本文を捨てていたので、それが見えなかった。
+> **いまは必ず表示する。**
 
 ### 項目名のゆらぎ
 

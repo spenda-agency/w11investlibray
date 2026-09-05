@@ -1,7 +1,7 @@
 import { writeFile, mkdir } from 'node:fs/promises';
 import { dirname } from 'node:path';
 import { toSymbolId } from '@invest/core';
-import { Jquants, sleep } from '../jquants.js';
+import { Jquants, JP_PATHS, sleep } from '../jquants.js';
 import { insertStatements } from '../sql.js';
 
 /**
@@ -28,11 +28,10 @@ export async function runBackfill(options: BackfillOptions): Promise<number> {
 
   // 営業日だけを取りに行く。休日に投げても空が返るだけで時間の無駄になる。
   console.error(`営業日カレンダーを取得: ${options.from} 〜 ${options.to}`);
-  const calendar = await client.getAll(
-    '/markets/trading_calendar',
-    { from: options.from, to: options.to },
-    'trading_calendar',
-  );
+  const calendar = await client.getAll(JP_PATHS.calendar, {
+    from: options.from,
+    to: options.to,
+  });
   const tradingDays = calendar
     .filter((r) => client.stringOf(r, 'holidayDivision') !== '0')
     .map((r) => client.stringOf(r, 'date'))
@@ -62,7 +61,7 @@ export async function runBackfill(options: BackfillOptions): Promise<number> {
 
   let totalRows = 0;
   for (const [i, date] of tradingDays.entries()) {
-    const rows = await client.getAll('/prices/daily_quotes', { date }, 'daily_quotes');
+    const rows = await client.getAll(JP_PATHS.dailyBars, { date });
     const priceRows: (readonly unknown[])[] = [];
     for (const row of rows) {
       const code = client.stringOf(row, 'code');

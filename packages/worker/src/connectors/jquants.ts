@@ -28,9 +28,9 @@ export const FIELD_ALIASES: Readonly<Record<string, readonly string[]>> = {
   low: ['Low', 'L', 'AdjustmentLow'],
   close: ['Close', 'C', 'AdjustmentClose'],
   volume: ['Volume', 'V', 'Vo', 'AdjustmentVolume'],
-  turnover: ['TurnoverValue', 'TuVa', 'Turnover'],
-  adjustmentFactor: ['AdjustmentFactor', 'AdjFa', 'AdjF'],
-  companyName: ['CompanyName', 'Name', 'CoNm'],
+  turnover: ['TurnoverValue', 'Va', 'TurnoverVa', 'TuVa', 'Turnover'],
+  adjustmentFactor: ['AdjustmentFactor', 'AdjFactor', 'AdjustmentF', 'AdjFa', 'AdjF'],
+  companyName: ['CompanyName', 'CompanyNameJapanese', 'Name', 'CoName', 'Nm', 'CoNm'],
   companyNameEnglish: ['CompanyNameEnglish', 'NameEnglish'],
   sector33: ['Sector33CodeName', 'Sector33Code', 'Sc33Nm'],
   sector17: ['Sector17CodeName', 'Sector17Code', 'Sc17Nm'],
@@ -88,8 +88,12 @@ export class JquantsClient {
   /**
    * ページングを畳んで全件を返す。
    * J-Quants は `pagination_key` を返してくるので、無くなるまで辿る。
+   *
+   * **レコードは `data` キーに入る。** V1 は経路ごとに違うキー
+   * （`info` / `daily_quotes` / …）だったが、V2 は全経路 `data` で揃っている。
+   * 既定値にしてあるのは、また変わったときに 1 箇所で受けられるようにするため。
    */
-  async getAll(path: string, params: Record<string, string>, key: string): Promise<JquantsRow[]> {
+  async getAll(path: string, params: Record<string, string>, key = 'data'): Promise<JquantsRow[]> {
     const rows: JquantsRow[] = [];
     let paginationKey: string | undefined;
     // 無限ループの保険。1 日ぶんが 100 ページを超えることは無い。
@@ -167,6 +171,24 @@ export class JquantsClient {
   }
 }
 
+/**
+ * V2 の経路。**V1 とは名前がまったく違う。**
+ *
+ *   /listed/info              → /equities/master
+ *   /prices/daily_quotes      → /equities/bars/daily
+ *   /markets/trading_calendar → /markets/calendar
+ *
+ * V1 の名前のまま /v2 に投げると、API Gateway が経路なしとして **403** を返す。
+ * 「契約プランの範囲外」に見えるので、原因に辿り着くまで遠回りした。
+ * 出典は本番運用中の実装（spenda-agency/w09jquantsclaude の
+ * `src/jqsd/jquants.py`）。**推測で書かないこと。**
+ */
+export const JP_PATHS = {
+  master: '/equities/master',
+  dailyBars: '/equities/bars/daily',
+  calendar: '/markets/calendar',
+} as const;
+
 /** 日本株のデータ取得口。`MarketDataSource` を実装している。 */
 export class JquantsJpSource implements MarketDataSource {
   readonly market = 'JP' as const;
@@ -175,9 +197,9 @@ export class JquantsJpSource implements MarketDataSource {
 
   async listSymbols(asOf: string): Promise<SymbolRow[]> {
     // date を指定すると「その日時点の」一覧が返る。廃止銘柄の把握に必須。
-    const rows = await this.client.getAll('/listed/info', { date: asOf }, 'info');
+    const rows = await this.client.getAll(JP_PATHS.master, { date: asOf });
     return rows.map((row) => {
-      const code = this.client.requireString(row, 'code', '/listed/info');
+      const code = this.client.requireString(row, 'code', JP_PATHS.master);
       return {
         symbolId: toSymbolId('JP', code),
         market: 'JP' as const,
@@ -194,10 +216,10 @@ export class JquantsJpSource implements MarketDataSource {
   async fetchDailyBars(date: string): Promise<PriceRow[]> {
     // date 指定なら 1 リクエストで全銘柄が返る。
     // 500 銘柄でも 4,000 銘柄でも取得コストが変わらないのはこのため。
-    const rows = await this.client.getAll('/prices/daily_quotes', { date }, 'daily_quotes');
+    const rows = await this.client.getAll(JP_PATHS.dailyBars, { date });
     const out: PriceRow[] = [];
     for (const row of rows) {
-      const code = this.client.requireString(row, 'code', '/prices/daily_quotes');
+      const code = this.client.requireString(row, 'code', JP_PATHS.dailyBars);
       const close = this.client.optionalNumber(row, 'close');
       // 売買が成立しなかった日は価格が null で返る。その日は行を作らない。
       if (close === null) continue;
@@ -217,16 +239,12 @@ export class JquantsJpSource implements MarketDataSource {
   }
 
   async tradingCalendar(from: string, to: string): Promise<CalendarRow[]> {
-    const rows = await this.client.getAll(
-      '/markets/trading_calendar',
-      { from, to },
-      'trading_calendar',
-    );
+    const rows = await this.client.getAll(JP_PATHS.calendar, { from, to });
     return rows.map((row) => {
       const division = this.client.optionalString(row, 'holidayDivision');
       return {
         market: 'JP' as const,
-        date: this.client.requireString(row, 'date', '/markets/trading_calendar'),
+        date: this.client.requireString(row, 'date', JP_PATHS.calendar),
         // 0 = 非営業日。1 = 営業日、2 = 東証半日立会（営業日として扱う）。
         isOpen: division !== '0',
       };

@@ -65,11 +65,46 @@ V2 で項目名が短縮された（`Close` → `C` など）。**長短どち�
 `npm run check:datasource` を実行し、結果をここに追記すること。
 
 ```
-確認日:            （未記入）
-プラン:            （未記入）
-日足の遅延:        （未記入）
-取得可能な期間:    （未記入）
+確認日:            2026-09-05
+プラン:            Light
+日足の遅延:        無し（2026-09-02 の 4,440 銘柄が 09-05 に取得できた）
+取得可能な期間:    （未確認）
 ```
+
+**取得可能な期間はまだ埋まっていない。** B3 のバックフィル範囲を決めるのに要る:
+
+```
+node packages/batch/.build/cli.mjs check --date 2021-09-02
+```
+
+通れば 5 年前まで遡れる。403 なら「→」の行に理由が出るので、
+年を縮めながら下限を探す。
+
+### 実際に返ってくる項目名（2026-09-05 / Light）
+
+**別名表（`FIELD_ALIASES`）の唯一の根拠。** 触るときはここを見る。
+
+| 経路 | 返ってきたキー |
+|---|---|
+| `/equities/master` | `Date, Code, CoName, CoNameEn, S17, S17Nm, S33, S33Nm, ScaleCat, Mkt, MktNm, Mrgn, MrgnNm, ProdCat` |
+| `/equities/bars/daily` | `Date, Code, O, H, L, C, UL, LL, Vo, Va, AdjFactor, AdjO, AdjH, AdjL, AdjC, AdjVo, MktCap, ExRT` |
+| `/markets/calendar` | `Date, HolDiv` |
+
+**調整済みの値（`AdjO`〜`AdjVo`）は使わない。** 生値 + `AdjFactor` を
+`@invest/core` が調整する設計で、バックテストと本番で同じ計算を通すという
+前提がそこに乗っている。`MktCap`・`ExRT`・`UL`/`LL` もいまは取り込まない。
+
+> ### `HolDiv` を別名表に持っておらず、祝日が営業日になっていた
+>
+> 営業日区分の実際の名前は `HolDiv`。当初の表には
+> `HolidayDivision` / `HolidayDiv` / `HdDiv` しか無く、当たらなかった。
+>
+> 読み出しが `optionalString` だったため `null` が返り、
+> **`null !== '0'` が `true`** になって、**祝日を含む全日が営業日**として
+> 扱われていた。例外も警告も出ない。
+>
+> 別名を足したうえで、**`requireString` に変えて取れなければ止める**ようにした。
+> 営業日判定は推測で埋めてよい値ではない。
 
 ---
 

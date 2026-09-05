@@ -43,10 +43,10 @@ export const FIELD_ALIASES: Readonly<Record<string, readonly string[]>> = {
   volume: ['Volume', 'V', 'Vo', 'AdjustmentVolume'],
   turnover: ['TurnoverValue', 'Va', 'TurnoverVa', 'TuVa', 'Turnover'],
   adjustmentFactor: ['AdjustmentFactor', 'AdjFactor', 'AdjustmentF', 'AdjFa', 'AdjF'],
-  companyName: ['CompanyName', 'CompanyNameJapanese', 'Name', 'CoName', 'Nm', 'CoNm'],
-  sector33: ['Sector33CodeName', 'Sector33Code', 'Sc33Nm'],
-  sector17: ['Sector17CodeName', 'Sector17Code', 'Sc17Nm'],
-  holidayDivision: ['HolidayDivision', 'HolidayDiv', 'HdDiv'],
+  companyName: ['CoName', 'CompanyName', 'CompanyNameJapanese', 'Name', 'Nm', 'CoNm'],
+  sector33: ['S33Nm', 'S33', 'Sector33CodeName', 'Sector33Code', 'Sc33Nm'],
+  sector17: ['S17Nm', 'S17', 'Sector17CodeName', 'Sector17Code', 'Sc17Nm'],
+  holidayDivision: ['HolDiv', 'HolidayDivision', 'HolidayDiv', 'HdDiv'],
 };
 
 export type Row = Record<string, unknown>;

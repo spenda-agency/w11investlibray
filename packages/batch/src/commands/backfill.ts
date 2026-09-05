@@ -32,8 +32,21 @@ export async function runBackfill(options: BackfillOptions): Promise<number> {
     from: options.from,
     to: options.to,
   });
+  // **推測で埋めない。取れなければ止める。**
+  // `stringOf(...) !== '0'` は、別名が当たらないと null !== '0' で true になり、
+  // **祝日がすべて営業日として数えられる**。例外も出ないので気付けない。
+  // 実際そうなっていた（実物の項目名は HolDiv で、別名表に無かった）。
   const tradingDays = calendar
-    .filter((r) => client.stringOf(r, 'holidayDivision') !== '0')
+    .filter((r) => {
+      const division = client.stringOf(r, 'holidayDivision');
+      if (division === null) {
+        throw new Error(
+          `営業日区分が読めない（${JP_PATHS.calendar}）。実際のキー: ${Object.keys(r).join(', ')}。` +
+            'JQUANTS_FIELD_ALIASES に別名を足すこと。',
+        );
+      }
+      return division !== '0';
+    })
     .map((r) => client.stringOf(r, 'date'))
     .filter((d): d is string => d !== null)
     .sort();

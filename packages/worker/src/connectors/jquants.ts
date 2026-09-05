@@ -30,12 +30,12 @@ export const FIELD_ALIASES: Readonly<Record<string, readonly string[]>> = {
   volume: ['Volume', 'V', 'Vo', 'AdjustmentVolume'],
   turnover: ['TurnoverValue', 'Va', 'TurnoverVa', 'TuVa', 'Turnover'],
   adjustmentFactor: ['AdjustmentFactor', 'AdjFactor', 'AdjustmentF', 'AdjFa', 'AdjF'],
-  companyName: ['CompanyName', 'CompanyNameJapanese', 'Name', 'CoName', 'Nm', 'CoNm'],
-  companyNameEnglish: ['CompanyNameEnglish', 'NameEnglish'],
-  sector33: ['Sector33CodeName', 'Sector33Code', 'Sc33Nm'],
-  sector17: ['Sector17CodeName', 'Sector17Code', 'Sc17Nm'],
-  marketCode: ['MarketCodeName', 'MarketCode', 'MktCdNm'],
-  holidayDivision: ['HolidayDivision', 'HolidayDiv', 'HdDiv'],
+  companyName: ['CoName', 'CompanyName', 'CompanyNameJapanese', 'Name', 'Nm', 'CoNm'],
+  companyNameEnglish: ['CoNameEn', 'CompanyNameEnglish', 'NameEnglish'],
+  sector33: ['S33Nm', 'S33', 'Sector33CodeName', 'Sector33Code', 'Sc33Nm'],
+  sector17: ['S17Nm', 'S17', 'Sector17CodeName', 'Sector17Code', 'Sc17Nm'],
+  marketCode: ['MktNm', 'Mkt', 'MarketCodeName', 'MarketCode', 'MktCdNm'],
+  holidayDivision: ['HolDiv', 'HolidayDivision', 'HolidayDiv', 'HdDiv'],
 };
 
 export type JquantsRow = Record<string, unknown>;
@@ -241,7 +241,12 @@ export class JquantsJpSource implements MarketDataSource {
   async tradingCalendar(from: string, to: string): Promise<CalendarRow[]> {
     const rows = await this.client.getAll(JP_PATHS.calendar, { from, to });
     return rows.map((row) => {
-      const division = this.client.optionalString(row, 'holidayDivision');
+      // **推測で埋めない。取れなければ止める。**
+      // optionalString だと、別名が当たらないとき null が返り、
+      // `null !== '0'` が true になって**祝日がすべて営業日になる**。
+      // 例外も警告も出ないまま、休場日に前日のスコアを上書きし始める。
+      // 実際そうなっていた（実物の項目名は HolDiv で、表に無かった）。
+      const division = this.client.requireString(row, 'holidayDivision', JP_PATHS.calendar);
       return {
         market: 'JP' as const,
         date: this.client.requireString(row, 'date', JP_PATHS.calendar),

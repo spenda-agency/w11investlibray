@@ -160,6 +160,94 @@ test('銘柄一覧 — symbol_id に市場の名前空間が付く', async () =>
   assert.equal(symbols[0].currency, 'JPY');
 });
 
+// ---- 実物の形（2026-09-05 に check:datasource が返したキーそのもの）------------
+//
+// **ここが再発防止の本体。** これまでの擬似応答は「実装に合わせて」書いていたので、
+// 経路名が V1 のままでも、別名表が実物とずれていても、全部通っていた。
+// 以下は API が実際に返したキーの並びをそのまま貼ってある。
+// 触るときは check:datasource の出力で確かめること。
+
+test('実物 — /equities/master のキーから銘柄が読める', async () => {
+  // 実際の並び: Date, Code, CoName, CoNameEn, S17, S17Nm, S33, S33Nm,
+  //             ScaleCat, Mkt, MktNm, Mrgn, MrgnNm, ProdCat
+  const impl = fakeFetch([
+    {
+      data: [
+        {
+          Date: '2026-09-02', Code: '72030', CoName: 'トヨタ自動車', CoNameEn: 'TOYOTA',
+          S17: '6', S17Nm: '自動車・輸送機', S33: '3700', S33Nm: '輸送用機器',
+          ScaleCat: 'TOPIX Core30', Mkt: '0111', MktNm: 'プライム',
+          Mrgn: '1', MrgnNm: '信用', ProdCat: '1',
+        },
+      ],
+    },
+  ]);
+  const source = new JquantsJpSource(new JquantsClient('k', { fetchImpl: impl }));
+  const [sym] = await source.listSymbols('2026-09-02');
+  assert.equal(sym.symbolId, 'JP.72030');
+  assert.equal(sym.name, 'トヨタ自動車', 'CoName を読めていない');
+  assert.equal(sym.sector33, '輸送用機器', 'S33Nm を読めていない — 業種フィルタが空振りする');
+  assert.equal(sym.sector17, '自動車・輸送機', 'S17Nm を読めていない');
+});
+
+test('実物 — /markets/calendar の HolDiv で休場を判定する', async () => {
+  // 実際の並び: Date, HolDiv
+  //
+  // **ここが当たらないと、静かに全日が営業日になる。**
+  // optionalString だった頃は null !== '0' が true になり、
+  // 祝日を営業日として保存していた。例外も警告も出なかった。
+  const impl = fakeFetch([
+    {
+      data: [
+        { Date: '2026-01-01', HolDiv: '0' },
+        { Date: '2026-01-05', HolDiv: '1' },
+        { Date: '2026-01-06', HolDiv: '2' },
+      ],
+    },
+  ]);
+  const source = new JquantsJpSource(new JquantsClient('k', { fetchImpl: impl }));
+  const cal = await source.tradingCalendar('2026-01-01', '2026-01-07');
+  assert.deepEqual(cal.map((c) => c.isOpen), [false, true, true]);
+});
+
+test('実物 — 営業日区分が読めなければ止まる（黙って営業日にしない）', async () => {
+  const impl = fakeFetch([{ data: [{ Date: '2026-01-01', UnknownDivision: '0' }] }]);
+  const source = new JquantsJpSource(new JquantsClient('k', { fetchImpl: impl }));
+  await assert.rejects(
+    () => source.tradingCalendar('2026-01-01', '2026-01-07'),
+    (err) => err instanceof JquantsError && /UnknownDivision/.test(err.message),
+    '読めない区分を黙って営業日として通している',
+  );
+});
+
+test('実物 — /equities/bars/daily は余計な項目があっても読める', async () => {
+  // 実際の並び: Date, Code, O, H, L, C, UL, LL, Vo, Va, AdjFactor,
+  //             AdjO, AdjH, AdjL, AdjC, AdjVo, MktCap, ExRT
+  //
+  // **調整済みの値（AdjO…AdjVo）は使わない。** 生値 + AdjFactor を
+  // @invest/core が調整する設計で、バックテストと本番で同じ計算を通している。
+  const impl = fakeFetch([
+    {
+      data: [
+        {
+          Date: '2026-09-02', Code: '72030', O: 3000, H: 3100, L: 2950, C: 3050,
+          UL: 3500, LL: 2500, Vo: 12000, Va: 36600000, AdjFactor: 1,
+          AdjO: 3000, AdjH: 3100, AdjL: 2950, AdjC: 3050, AdjVo: 12000,
+          MktCap: 45000000000000, ExRT: 0,
+        },
+      ],
+    },
+  ]);
+  const source = new JquantsJpSource(new JquantsClient('k', { fetchImpl: impl }));
+  const [bar] = await source.fetchDailyBars('2026-09-02');
+  assert.equal(bar.symbolId, 'JP.72030');
+  assert.equal(bar.open, 3000);
+  assert.equal(bar.close, 3050);
+  assert.equal(bar.volume, 12000);
+  assert.equal(bar.turnover, 36600000);
+  assert.equal(bar.adjustmentFactor, 1);
+});
+
 test('別名設定の JSON が壊れていてもパイプラインを止めない', () => {
   assert.deepEqual(parseAliases('{ broken'), {});
   assert.deepEqual(parseAliases(''), {});
